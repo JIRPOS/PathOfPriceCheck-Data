@@ -14,4 +14,4 @@ CDN; no image, sound, or model data is copied into a release.
 This project is not affiliated with or endorsed by Grinding Gear Games.
 
 If you are from GGG and would like a change made or the releases taken down, open an issue
-or use the contact address in `CONTACT.md` and it will be actioned.
+or see `CONTACT.md` and it will be actioned.
