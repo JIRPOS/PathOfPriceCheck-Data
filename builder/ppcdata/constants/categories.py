@@ -51,28 +51,51 @@ TRADE_CATEGORY_BY_CLASS_ID = {
     "HybridFlask": "flask",
     "UtilityFlask": "flask",
     "UtilityFlaskCritical": "flask",
-    # Maps and fragments
+    # Both exist: "Map" is the map item, "MapKey" the Atlas keystone-style entry.
     "Map": "map",
+    "MapKey": "map",
     "MapFragment": "map.fragment",
     "Breachstone": "map.breachstone",
     "MiscMapItem": "map.fragment",
     # Misc
     "DivinationCard": "card",
     "Leaguestone": "leaguestone",
-    "Contract": "heistmission.contract",
-    "Blueprint": "heistmission.blueprint",
+    "HeistContract": "heistmission.contract",
+    "HeistBlueprint": "heistmission.blueprint",
     "HeistEquipmentWeapon": "heistequipment.heistweapon",
     "HeistEquipmentTool": "heistequipment.heisttool",
     "HeistEquipmentUtility": "heistequipment.heistutility",
     "HeistEquipmentReward": "heistequipment.heistreward",
+    "HeistObjective": "currency.heistobjective",
     "Incubator": "currency.incubator",
+    "IncubatorStackable": "currency.incubator",
     "DelveStackableSocketableCurrency": "currency.fossil",
+    "DelveSocketableCurrency": "currency.resonator",
     "StackableCurrency": "currency",
     "Currency": "currency",
+    "UniqueFragment": "currency.piece",
     "Tincture": "tincture",
-    "Corpse": "corpse",
-    "Idol": "idol",
+    "ItemisedCorpse": "corpse",
+    "AtlasRelic": "idol",
+    "BrequelFruit": "wombgift",
+    "CocoonedItem": "enshrouded",
+    "DeepwaterChart": "chart",
+    "MemoryLine": "memoryline",
+    "ItemisedSanctum": "sanctum.research",
     "SanctumSpecialRelic": "sanctum.relic",
-    "SanctumRelic": "sanctum.relic",
+    "Relic": "sanctum.relic",
+    "SmallRelic": "sanctum.relic",
+    "MediumRelic": "sanctum.relic",
+    "LargeRelic": "sanctum.relic",
     "ExpeditionLogbook": "logbook",
+}
+
+# Classes with no trade category on purpose: they are never listed for sale, so constraining
+# a search by them would be meaningless. Kept explicit so the build can tell "deliberately
+# unmapped" from "nobody has looked at this yet".
+INTENTIONALLY_UNMAPPED = {
+    "QuestItem", "HideoutDoodad", "Microtransaction", "LabyrinthItem", "LabyrinthTrinket",
+    "LabyrinthMapItem", "PantheonSoul", "IncursionItem", "AtlasUpgradeItem", "HiddenItem",
+    "InstanceLocalItem", "ArchnemesisMod", "MetamorphosisDNA", "SentinelDrone", "VaultKey",
+    "AnimalCharm", "NecropolisPack", "Gold", "UniqueShard", "UniqueShardBase",
 }

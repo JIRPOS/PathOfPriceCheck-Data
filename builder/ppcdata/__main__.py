@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from . import normalize, statdesc
-from .constants.categories import TRADE_CATEGORY_BY_CLASS_ID
+from .constants.categories import INTENTIONALLY_UNMAPPED, TRADE_CATEGORY_BY_CLASS_ID
 from .constants.known_stats import BETTER_MINUS_ONE, TRADE_INVERTED
 from .emit import index as emit_index
 from .emit import items as emit_items
@@ -106,7 +106,14 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     class_records = emit_items.build_classes(classes, TRADE_CATEGORY_BY_CLASS_ID)
     mapped = sum(1 for c in class_records if c["tradeCategory"])
-    print(f"  item classes: {len(class_records)} ({mapped} mapped to a trade category)")
+    # Anything neither mapped nor explicitly waived is a gap someone should look at, so name
+    # it rather than letting it hide in a count.
+    gaps = sorted(c["id"] for c in class_records
+                  if not c["tradeCategory"] and c["id"] not in INTENTIONALLY_UNMAPPED)
+    print(f"  item classes: {len(class_records)} ({mapped} mapped, "
+          f"{len(INTENTIONALLY_UNMAPPED & {c['id'] for c in class_records})} waived)")
+    if gaps:
+        print(f"  unmapped item classes (no trade category yet): {', '.join(gaps)}")
 
     # ndjson + indices
     stats_path = out / f"{LANG}-stats.ndjson"
