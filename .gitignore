@@ -1,0 +1,7 @@
+# Extractor workdir: bundle cache, decoded tables, raw game files.
+builder/.work/
+# Build output — published as release assets, never committed.
+out/
+__pycache__/
+*.pyc
+.venv/

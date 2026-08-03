@@ -1,0 +1,77 @@
+import textwrap
+
+from ppcdata import statdesc
+from ppcdata.emit.stats import join_key
+
+# A faithful slice of the real file: the block that gave both the negate wording and the
+# fixed-value one for local physical damage.
+SAMPLE = textwrap.dedent("""\
+    description
+    \t2 local_physical_damage_+% local_weapon_no_physical_damage
+    \t5
+    \t\t# 1|# "No Physical Damage"
+    \t\t# #|-1 "No Physical Damage"
+    \t\t#|-100 # "No Physical Damage"
+    \t\t1|# 0 "{0}% increased Physical Damage"
+    \t\t-99|-1 0 "{0}% reduced Physical Damage" negate 1
+    \tlang "German"
+    \t5
+    \t\t1|# 0 "{0}% erhöhter physischer Schaden"
+
+    description
+    \t1 base_maximum_life
+    \t1
+    \t\t# "{0:+d} to maximum Life"
+    """)
+
+
+def _parse(tmp_path, text=SAMPLE):
+    p = tmp_path / "stat_descriptions.txt"
+    p.write_text(text, encoding="utf-16")
+    return statdesc.parse(str(p))
+
+
+def test_parses_blocks_and_ignores_other_languages(tmp_path):
+    descs = _parse(tmp_path)
+    assert len(descs) == 2
+    assert descs[0].stat_ids == ["local_physical_damage_+%", "local_weapon_no_physical_damage"]
+    assert descs[1].stat_ids == ["base_maximum_life"]
+    # The German variant must not leak in as a wording.
+    assert all("erhöhter" not in v.text for v in descs[0].variants)
+
+
+def test_placeholders_become_hashes(tmp_path):
+    descs = _parse(tmp_path)
+    assert descs[1].variants[0].text == "# to maximum Life"
+
+
+def test_primary_variant_skips_leading_special_cases(tmp_path):
+    # The block opens with three "No Physical Damage" forms; the stat's own wording is the
+    # first that shows a number and is not a negation.
+    d = _parse(tmp_path)[0]
+    assert statdesc.primary_variant(d).text == "#% increased Physical Damage"
+
+
+def test_negate_and_implied_value_are_captured(tmp_path):
+    d = _parse(tmp_path)[0]
+    by_text = {}
+    for v in d.variants:
+        by_text.setdefault(v.text, []).append(v)
+    assert any(v.negate for v in by_text["#% reduced Physical Damage"])
+    # "#|-100" means the wording stands for a -100 roll.
+    assert any(v.fixed_value == -100.0 for v in by_text["No Physical Damage"])
+
+
+def test_every_wording_is_indexed_not_just_the_first(tmp_path):
+    idx = statdesc.by_english_text(_parse(tmp_path))
+    for wording in ("#% increased Physical Damage", "#% reduced Physical Damage",
+                    "No Physical Damage", "# to maximum Life"):
+        assert wording in idx, wording
+
+
+def test_join_key_strips_the_trade_side_plus():
+    # Trade writes "+# to maximum Life"; the game's {0:+d} folds the sign into the number.
+    assert join_key("+# to maximum Life") == "# to maximum Life"
+    assert join_key("# to maximum Life") == "# to maximum Life"
+    # A '+' that is not in front of a placeholder is left alone.
+    assert join_key("Adds # to # Fire Damage") == "Adds # to # Fire Damage"

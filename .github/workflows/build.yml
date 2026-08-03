@@ -1,0 +1,127 @@
+name: Build data bundle
+
+on:
+  schedule:
+    # Every 6 hours, offset off the hour so we are not competing with everyone else's cron.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Publish even when the output is unchanged
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'builder/**'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-data
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve game patch
+        id: patch
+        run: |
+          patch=$(curl -sS --fail --max-time 30 \
+            https://raw.githubusercontent.com/poe-tool-dev/latest-patch-version/main/latest.txt)
+          echo "patch=$patch" >> "$GITHUB_OUTPUT"
+          echo "Game patch: $patch"
+
+      # Bundles are hundreds of MB and only change on patch day, so key the cache on the
+      # patch string. A miss just means a slower run, never a wrong one.
+      - name: Cache extracted game bundles
+        uses: actions/cache@v4
+        with:
+          path: builder/.work/.cache
+          key: poe-bundles-${{ steps.patch.outputs.patch }}
+
+      - name: Run builder tests
+        working-directory: builder
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest tests -q
+
+      - name: Fetch the previous bundle
+        id: prev
+        run: |
+          mkdir -p prev
+          base=https://github.com/${{ github.repository }}/releases/latest/download
+          if curl -sSL --fail --max-time 60 "$base/manifest.json" -o prev/manifest.json; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            # Only the files the notes diff reads; no need for the indices.
+            for f in en-items.ndjson en-stats.ndjson item-classes.ndjson; do
+              curl -sSL --fail --max-time 300 "$base/$f" -o "prev/$f" || true
+            done
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No previous release — this will be the first."
+          fi
+
+      - name: Build
+        working-directory: builder
+        run: |
+          python -m ppcdata build \
+            --out ../out --workdir .work \
+            --patch '${{ steps.patch.outputs.patch }}' \
+            --data-version "$(date -u +%Y%m%d).${{ github.run_number }}" \
+            --tag "data-$(date -u +%Y%m%d).${{ github.run_number }}"
+
+      - name: Verify
+        working-directory: builder
+        run: python -m ppcdata verify --out ../out
+
+      # Inputs churn without outputs changing — GGG re-serves identical bodies — so compare
+      # the output hashes, not the sources. That is the honest gate for "publish or not".
+      - name: Decide whether to publish
+        id: decide
+        run: |
+          if [ "${{ inputs.force }}" = "true" ] || [ "${{ steps.prev.outputs.found }}" != "true" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, sys
+          sys.path.insert(0, "builder")
+          from ppcdata.emit.manifest import outputs_match
+          old = json.load(open("prev/manifest.json"))
+          new = json.load(open("out/manifest.json"))
+          same = outputs_match(old, new)
+          print(f"publish={'false' if same else 'true'}")
+          PY
+          echo "Previous data_version: $(jq -r .data_version prev/manifest.json)"
+
+      - name: No change
+        if: steps.decide.outputs.publish != 'true'
+        run: echo "Every output file is byte-identical to the current release. Publishing nothing."
+
+      - name: Release notes
+        if: steps.decide.outputs.publish == 'true'
+        working-directory: builder
+        run: python -m ppcdata notes --old ../prev --new ../out --output ../NOTES.md
+
+      - name: Publish release
+        if: steps.decide.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(jq -r '"data-" + .data_version' out/manifest.json)
+          gh release create "$tag" out/* \
+            --title "$tag" \
+            --notes-file NOTES.md
+          echo "Published $tag"
