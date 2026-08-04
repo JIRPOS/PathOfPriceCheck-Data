@@ -46,11 +46,15 @@ TABLES = [
         "TagsKeys", "Implicit_ModsKeys", "IsCorrupted", "InheritsFrom", "ModDomain"]},
     {"name": "Tags", "columns": ["Id"]},
     {"name": "Stats", "columns": ["Id", "IsLocal", "IsWeaponLocal"]},
+    # All eight stat slots, not the first six: a unique's mod that granted a seventh stat
+    # would otherwise lose that filter silently, and 541 mods already reach the sixth.
     {"name": "Mods", "columns": [
         "Id", "Level", "Domain", "Name", "GenerationType",
-        "StatsKey1", "StatsKey2", "StatsKey3", "StatsKey4", "StatsKey5", "StatsKey6",
+        "StatsKey1", "StatsKey2", "StatsKey3", "StatsKey4",
+        "StatsKey5", "StatsKey6", "StatsKey7", "StatsKey8",
         "Stat1Min", "Stat1Max", "Stat2Min", "Stat2Max", "Stat3Min", "Stat3Max",
-        "Stat4Min", "Stat4Max", "Stat5Min", "Stat5Max", "Stat6Min", "Stat6Max"]},
+        "Stat4Min", "Stat4Max", "Stat5Min", "Stat5Max", "Stat6Min", "Stat6Max",
+        "Stat7Min", "Stat7Max", "Stat8Min", "Stat8Max"]},
     {"name": "ArmourTypes", "columns": [
         "BaseItemTypesKey", "ArmourMin", "ArmourMax", "EvasionMin", "EvasionMax",
         "EnergyShieldMin", "EnergyShieldMax", "WardMin", "WardMax"]},

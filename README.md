@@ -17,6 +17,9 @@ build, not a new binary.
 | `en-items.ndjson` | base types, uniques, gems, divination cards, captured beasts |
 | `en-items-name.index.bin` | fnv1a32 index, key `"{namespace}::{name}"` |
 | `en-items-ref.index.bin` | fnv1a32 index, key `"{namespace}::{refName}"` |
+| `en-items-base.index.bin` | fnv1a32 index over uniques only, key `"UNIQUE::{unique.base}"` — which uniques drop on a base, which is all an unidentified one states |
+| `en-unique-mods.ndjson` | per unique: the mods it can roll, which of them come from a pool, and their ranges |
+| `en-unique-mods-name.index.bin` | fnv1a32 index, key `"UNIQUE::{name}"` |
 | `en-stats.ndjson` | clipboard wordings → trade stat hashes, with negate/fixed-value matchers |
 | `en-stats-matcher.index.bin` | fnv1a32 index over every matcher string |
 | `en-stats-ref.index.bin` | fnv1a32 index over the canonical wording |
@@ -37,7 +40,7 @@ later as something the client either understands or refuses, rather than as a fo
 
 ## Where the data comes from
 
-Two sources, joined on the normalized wording:
+Two sources for everything except the unique-mod dataset, joined on the normalized wording:
 
 * **The game's own files.** [`pathofexile-dat`](https://github.com/SnosMe/poe-dat-viewer)
   downloads GGG's `.datc64` bundles straight from the patch CDN and decodes them with
@@ -56,6 +59,52 @@ The join key is the `#`-placeholder form of the wording — see
 [NORMALIZATION.md](NORMALIZATION.md), which the client reimplements and is tested against
 the vectors shipped in every release.
 
+### The third source, and why there has to be one
+
+`en-unique-mods.ndjson` answers "which mods can *this* unique roll, and which of them vary".
+A Watcher's Eye picks two or three mods out of 93; Ralakesh's Impatience rolls one of three
+charge modifiers, each `1..1`. The clipboard prints such a mod exactly like a fixed one, and
+the difference is routinely the difference between vendor trash and several divines.
+
+**That grouping is not in the game client.** Verified against patch 3.29.1.2.2 by enumerating
+all 1,205,200 paths in the bundle index: the only per-unique tables are `UniqueStashLayout`,
+`UniqueMaps`, `UniqueJewelLimits` and `UniqueUpgradesClient` — names, art, stash placement and
+limits — and `metadata/items/**` holds 397 base-class `.it` templates plus art directories.
+Mod-to-unique assignment is server-side, which is also why an unidentified unique shows only
+its base. `Mods.dat` *does* carry all 15,886 unique-generation mods with their stats and
+ranges, so only the grouping is missing, and mod ids embed the item's name for just 31 of
+1,383 uniques — a naming heuristic is not an option.
+
+So the grouping comes from **[poewiki](https://www.poewiki.net)'s `item_mods` cargo table**,
+which publishes GGG's own mod ids per unique page with `is_random` / `is_implicit` flags. It
+supplies an **id → id edge list and nothing else**: 9,313 rows, of which every mod id resolves
+in our own `Mods.dat` extraction. Every number in the emitted dataset — stats, ranges, trade
+hashes — is still client- and trade-API-derived, reached by exactly the join described above.
+Wiki content is CC BY-NC 3.0; see [DATA-LICENSE.md](DATA-LICENSE.md).
+
+One record per unique, keyed `UNIQUE::{name}`:
+
+```json
+{"base": "Prismatic Jewel", "name": "Watcher's Eye",
+ "fixed": [{"mod": "IncreasedEnergyShieldPercentUnique__2_",
+            "filters": [{"range": [[4, 6]], "ref": "#% increased maximum Energy Shield",
+                         "tradeId": "explicit.stat_2482852589"}]}],
+ "pools": [{"count": [2, 3], "hint": "Two or Three random aura modifiers",
+            "mods": [{"mod": "AngerIncreasedFireDamage",
+                      "filters": [{"range": [[40, 60]],
+                                   "ref": "#% increased Fire Damage while affected by Anger",
+                                   "tradeId": "explicit.stat_3337107517"}]}]}]}
+```
+
+`fixed` is every mod the item always has, `pools` the ones it picks from, `unlisted` a pool the
+wiki states in prose but does not enumerate. `range` has one `[min, max]` per stat the wording
+covers ("Adds # to # Fire Damage" has two) **in displayed units** — `Mods.dat` stores hundredths
+and milliseconds raw, and the record's `dp` is already applied. A filter with no `tradeId` is
+real and displayable but not searchable. `implicit: true` appears on an entry or a pool when the
+mod is an implicit. The consumer-side contract is
+[UNIQUE-MODS.md](https://github.com/JIRPOS/PathOfPriceCheck/blob/master/UNIQUE-MODS.md) in the
+app repo.
+
 ## Building locally
 
 Needs Python 3.11+ and Node.
@@ -65,7 +114,11 @@ cd builder
 python -m ppcdata build --out ../out          # downloads from the CDN; first run is slow
 python -m ppcdata verify --out ../out         # sha256s, index sortedness, offset sanity
 python -m ppcdata build --out ../out --skip-extract   # reuse the extraction in .work/
+python -m ppcdata build --out ../out --reuse-wiki     # reuse the cached poewiki mapping too
 ```
+
+`--allow-stale-wiki` (which CI passes) falls back to the cached mapping when the wiki fetch
+fails instead of failing the build; `--reuse-wiki` skips the fetch outright.
 
 The build is deterministic: two runs produce byte-identical data files. Only
 `manifest.json` differs, because it carries timestamps.
@@ -89,11 +142,24 @@ a partial bundle is worse than a stale one.
   text as their single matcher. That is correct for namespaces the client never renders
   (crucible mod text, veiled affix names, gem support text) and a known gap elsewhere.
 * Icons are stored as CDN URL strings. No game art is redistributed.
+* The wiki lags a league launch by days. A new unique simply has no `en-unique-mods.ndjson`
+  record until it does, and the app must degrade to "no pool data" rather than to a wrong
+  filter. The wiki also sits behind a bot challenge that answers HTML instead of JSON: CI
+  passes `--allow-stale-wiki` so that costs the dataset its freshness, not the whole bundle.
+* Within that dataset, 470 wordings resolve to two different trade ids and 695 to none at all;
+  both are emitted with their wording and range but **no `tradeId`**, so a pool list still
+  matches the count its hint states. 50 unique-rarity wiki pages (Sanctum relics, tattoos) are
+  dropped because the trade API does not list them, and 1,413 uniques get a record.
+* Forbidden Flame / Forbidden Flesh are a known gap: their one mod grants a hidden stat, and
+  trade searches them through an *option* stat the join does not reach. They get a record with
+  no mods rather than a wrong one.
 
 ## Credits
 
 * [awakened-poe-trade](https://github.com/SnosMe/awakened-poe-trade) (MIT) — the ndjson
   schema and the matching algorithm this reproduces
+* [the Path of Exile Wiki](https://www.poewiki.net) (CC BY-NC 3.0) — the `item_mods` cargo
+  table, which is where `en-unique-mods.ndjson` gets its unique → mod-id mapping
 * [poe-dat-viewer / pathofexile-dat](https://github.com/SnosMe/poe-dat-viewer)
 * [dat-schema](https://github.com/poe-tool-dev/dat-schema) and
   [latest-patch-version](https://github.com/poe-tool-dev/latest-patch-version)

@@ -20,7 +20,8 @@ from .emit import index as emit_index
 from .emit import items as emit_items
 from .emit import manifest as emit_manifest
 from .emit import stats as emit_stats
-from .sources import game_bundle, patch as patch_src, trade_api
+from .emit import unique_mods as emit_unique_mods
+from .sources import game_bundle, patch as patch_src, trade_api, wiki
 
 LANG = "en"
 
@@ -85,6 +86,8 @@ def cmd_build(args: argparse.Namespace) -> int:
     bases = game_bundle.table(work, "BaseItemTypes")
     armour = game_bundle.table(work, "ArmourTypes")
     tags = game_bundle.table(work, "Tags")
+    mods = game_bundle.table(work, "Mods")
+    game_stats = game_bundle.table(work, "Stats")
 
     print("building stats.ndjson ...")
     stat_records, sstats = emit_stats.build(trade_stats, descs, {
@@ -103,6 +106,32 @@ def cmd_build(args: argparse.Namespace) -> int:
     item_records, istats = emit_items.build(trade_items, bases, classes, armour, tags)
     for k, v in istats.items():
         print(f"  {k}: {v}")
+
+    print("building unique-mods.ndjson ...")
+    wiki_cache = work / "wiki" / "item_mods.json"
+    if args.reuse_wiki:
+        if not wiki_cache.exists():
+            print(f"ERROR: --reuse-wiki but no cached mapping at {wiki_cache}")
+            return 1
+        wiki_rows, wiki_cached = wiki.load_cache(wiki_cache), True
+        print(f"  reusing {len(wiki_rows)} cached wiki rows")
+    else:
+        wiki_rows, wiki_cached = wiki.fetch(wiki_cache,
+                                            allow_cache_fallback=args.allow_stale_wiki)
+        print(f"  {len(wiki_rows)} wiki rows{' (from cache)' if wiki_cached else ''}")
+
+    unique_names = {r["name"] for r in item_records if r["namespace"] == "UNIQUE"}
+    unique_records, ustats = emit_unique_mods.build(
+        wiki_rows, mods, game_stats, descs, stat_records, unique_names)
+    for k, v in ustats.items():
+        if not k.startswith("_"):
+            print(f"  {k}: {v}")
+    if ustats["_missing_examples"]:
+        print(f"  e.g. mod ids the client does not have: "
+              f"{', '.join(ustats['_missing_examples'][:5])}")
+    if ustats["_not_in_trade_examples"]:
+        print(f"  e.g. wiki pages trade does not list: "
+              f"{', '.join(ustats['_not_in_trade_examples'][:5])}")
 
     class_records = emit_items.build_classes(classes, TRADE_CATEGORY_BY_CLASS_ID)
     mapped = sum(1 for c in class_records if c["tradeCategory"])
@@ -133,8 +162,19 @@ def cmd_build(args: argparse.Namespace) -> int:
                   for r, (_, off) in zip(item_records, item_lines)]
     ref_item_pairs = [(f"{r['namespace']}::{r['refName']}", off)
                       for r, (_, off) in zip(item_records, item_lines)]
+    # Uniques by the base they drop on, which is all an unidentified one states.
+    base_pairs = [(f"UNIQUE::{r['unique']['base']}", off)
+                  for r, (_, off) in zip(item_records, item_lines)
+                  if r["namespace"] == "UNIQUE" and r.get("unique", {}).get("base")]
     _index_file(out / f"{LANG}-items-name.index.bin", name_pairs, "items-name")
     _index_file(out / f"{LANG}-items-ref.index.bin", ref_item_pairs, "items-ref")
+    _index_file(out / f"{LANG}-items-base.index.bin", base_pairs, "items-base")
+
+    unique_path = out / f"{LANG}-unique-mods.ndjson"
+    unique_lines = _write_ndjson(unique_path, unique_records)
+    _index_file(out / f"{LANG}-unique-mods-name.index.bin",
+                [(f"UNIQUE::{r['name']}", off)
+                 for r, (_, off) in zip(unique_records, unique_lines)], "unique-mods-name")
 
     _write_ndjson(out / "item-classes.ndjson", class_records)
 
@@ -144,7 +184,10 @@ def cmd_build(args: argparse.Namespace) -> int:
     generated_at = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     m = emit_manifest.build(out, data_version, game_patch, generated_at,
                             {"trade_stats_last_modified": stats_lm,
-                             "trade_items_last_modified": items_lm},
+                             "trade_items_last_modified": items_lm,
+                             # Attribution travels with the data, not just with this repo.
+                             "unique_mods_attribution": wiki.ATTRIBUTION,
+                             "unique_mods_from_cache": wiki_cached},
                             tag=args.tag)
     emit_manifest.write(out, m)
 
@@ -211,7 +254,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
     import struct
     for ndjson_name, idx_names in (
         (f"{LANG}-stats.ndjson", [f"{LANG}-stats-matcher.index.bin", f"{LANG}-stats-ref.index.bin"]),
-        (f"{LANG}-items.ndjson", [f"{LANG}-items-name.index.bin", f"{LANG}-items-ref.index.bin"]),
+        (f"{LANG}-items.ndjson", [f"{LANG}-items-name.index.bin",
+                                  f"{LANG}-items-ref.index.bin",
+                                  f"{LANG}-items-base.index.bin"]),
+        (f"{LANG}-unique-mods.ndjson", [f"{LANG}-unique-mods-name.index.bin"]),
     ):
         blob = (out / ndjson_name).read_bytes()
         starts = {0}
@@ -270,6 +316,7 @@ def cmd_notes(args: argparse.Namespace) -> int:
          lambda r: f"{r['namespace']}::{r['name']}"),
         ("stat wordings", f"{LANG}-stats.ndjson", lambda r: r["ref"]),
         ("item classes", "item-classes.ndjson", lambda r: r["itemClass"]),
+        ("uniques with modifier data", f"{LANG}-unique-mods.ndjson", lambda r: r["name"]),
     ):
         before, after = _keys(old / fname, key), _keys(new / fname, key)
         if not before:
@@ -311,6 +358,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="report, don't fail, when a curated stat entry matches nothing")
     b.add_argument("--skip-extract", action="store_true",
                    help="reuse an existing extraction in --workdir")
+    b.add_argument("--allow-stale-wiki", action="store_true",
+                   help="on a failed poewiki fetch, fall back to the cached mapping")
+    b.add_argument("--reuse-wiki", action="store_true",
+                   help="do not fetch poewiki at all; use the cached mapping")
     b.set_defaults(fn=cmd_build)
 
     v = sub.add_parser("verify")
