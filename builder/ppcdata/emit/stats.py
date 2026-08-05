@@ -16,6 +16,7 @@ so the trade side is normalized before matching.
 from __future__ import annotations
 
 import re
+from collections.abc import Container
 
 from ..normalize import placeholder_form
 from ..statdesc import Description, primary_variant
@@ -73,6 +74,58 @@ def _matchers(d: Description) -> list[dict]:
     return list(seen.values())
 
 
+def _own_matchers(d: Description, key: str, trade_keys: Container[str]) -> list[dict]:
+    """The wordings this record — and no sibling record — answers to.
+
+    One description renders several wordings, and trade indexes some of them under a hash of
+    their own: "#% chance to gain a Flask Charge when you deal a Critical Strike" and the 100%
+    "Gain a Flask Charge when you deal a Critical Strike", "Recover #% of Life on Kill" and
+    "Lose #% of Life on Kill", one entry per option of an option stat. Each of those becomes a
+    record here, so handing every one of them the description's whole variant list makes
+    several records claim the same wording — and the client, which resolves a clipboard line by
+    wording, cannot tell them apart. It refuses to guess rather than filter on the wrong stat,
+    so the modifier goes unsearched: 16 wordings including every Surgeon's flask. A wording
+    trade indexes separately belongs only to the record carrying its id.
+
+    Never empty: ``key`` is the join key of one of ``d``'s own variants, which is how the
+    caller reached ``d`` at all, and that variant matches the first arm.
+    """
+    return [m for m in _matchers(d)
+            if join_key(m["string"]) == key or join_key(m["string"]) not in trade_keys]
+
+
+def _ref_for(d: Description, matchers: list[dict]) -> str:
+    """The record's canonical wording — what a roll is stored relative to.
+
+    The description's primary rendering, unless that wording went to a sibling record: a record
+    that only answers to "Only affects Passives in Medium Ring" must not call itself the Small
+    one. `negate` is relative to this wording, so whichever one becomes it is not the inverse of
+    anything — a record keyed by trade's own "Lose #% of Life on Kill" hash stores the roll the
+    way that hash indexes it, positive.
+    """
+    primary = primary_variant(d).text
+    ref = primary if any(m["string"] == primary for m in matchers) else matchers[0]["string"]
+    for m in matchers:
+        if m["string"] == ref:
+            m.pop("negate", None)
+    return ref
+
+
+def _ambiguous(records: list[dict]) -> list[str]:
+    """Wordings two records both answer to inside one trade namespace.
+
+    That is the shape the client gives up on: it resolves a clipboard line to a wording, and a
+    wording reaching two records with a hash each is a filter it would have to guess at.
+    """
+    owners: dict[tuple[str, str], set[int]] = {}
+    for i, r in enumerate(records):
+        for m in r["matchers"]:
+            for ns, ids in r["trade"]["ids"].items():
+                if ids:
+                    owners.setdefault((join_key(m["string"]), ns), set()).add(i)
+    return sorted({w for (w, _), rs in owners.items() if len(rs) > 1})
+
+
 def build(trade_stats: dict, descs: list[Description], better_overrides: dict[str, int],
           inverted: set[str]) -> tuple[list[dict], dict]:
     """Return ``(records, stats)`` where records are the ndjson lines to write."""
@@ -103,13 +156,16 @@ def build(trade_stats: dict, descs: list[Description], better_overrides: dict[st
 
     records: list[dict] = []
     matched = 0
+    narrowed = 0
     for key in order:
         ids = grouped[key]
         d = by_text.get(key)
         if d is not None:
             matched += 1
-            ref = primary_variant(d).text
-            matchers = _matchers(d)
+            matchers = _own_matchers(d, key, grouped.keys())
+            ref = _ref_for(d, matchers)
+            if len(matchers) < len(_matchers(d)):
+                narrowed += 1
             dp = _dp_for(d)
         else:
             # No game description for this wording — trade indexes some stats the client
@@ -143,6 +199,11 @@ def build(trade_stats: dict, descs: list[Description], better_overrides: dict[st
             1 for r in records if any(m.get("negate") for m in r["matchers"])),
         "with_value_matcher": sum(
             1 for r in records if any("value" in m for m in r["matchers"])),
+        # Records that gave a wording up to the sibling holding trade's own hash for it.
+        "narrowed_to_own_wordings": narrowed,
+        # Must be 0: two records answering to one wording in one namespace is exactly what the
+        # client cannot resolve, and it drops the modifier rather than guess.
+        "wordings_ambiguous_in_a_namespace": _ambiguous(records),
         "stale_better_overrides": sorted(set(better_overrides) - all_refs),
         "stale_inverted": sorted(inverted - all_refs),
     }
