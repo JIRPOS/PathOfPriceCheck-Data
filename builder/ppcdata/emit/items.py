@@ -56,6 +56,12 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
             g = game_by_name.get(name)
             if g:
                 enriched += 1
+                # BaseItemTypes.Id *is* the Metadata/Items/... path, and that path is the only
+                # key GGG's public currency-exchange feed states an item by — that feed
+                # publishes no names at all, so emitting the id here is the whole of what lets
+                # a client join the two.
+                if g.get("Id"):
+                    rec["metadataId"] = g["Id"]
                 cat = class_name_by_row.get(g.get("ItemClassesKey"))
                 if cat:
                     rec["craftable"] = {"category": cat}
