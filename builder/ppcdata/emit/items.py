@@ -24,16 +24,48 @@ def _namespace(entry: dict) -> str:
     return _NAMESPACE_BY_GROUP.get(entry.get("_group", ""), "ITEM")
 
 
+# The mod domain every stackable currency-like base sits in. All 978 metadata ids in one
+# captured hour of the currency-exchange feed are rows in this domain, which is what makes it
+# usable as a liveness signal rather than a guess.
+_STACKABLE_DOMAIN = 43
+
+
+def _liveness(row: dict) -> tuple[bool, bool]:
+    """How likely a BaseItemTypes row is the base that actually drops today, highest first.
+
+    GGG keeps the superseded row when a base is replaced, so several rows share one display
+    name: Sacrifice at Dawn is both ``VaalFragment1_2`` and, since fragments became stackable,
+    ``CurrencyVaalFragment1_2``. Only the live row's id is ever named by the currency-exchange
+    feed, so taking whichever came first emitted an id nothing trades under and left every
+    fragment, breachstone and resonator with no exchange price at all.
+
+    Two signals, because neither covers everything: the mod domain (the legacy fragment rows
+    are in 14, not 43) and the ``Currency``/``Stackable`` marker GGG names the replacement
+    with — which is all that separates the resonators and the Atlas echoes, whose rows are
+    both in the stackable domain. Rows that tie keep the table's own order.
+    """
+    last = row.get("Id", "").rsplit("/", 1)[-1]
+    return (row.get("ModDomain") == _STACKABLE_DOMAIN,
+            last.startswith("Currency") or "Stackable" in last)
+
+
 def build(trade_items: dict, bases: list[dict], classes: list[dict],
           armour: list[dict], tags: list[dict]) -> tuple[list[dict], dict]:
     class_name_by_row = {c["_index"]: c.get("Name") or c.get("Id") for c in classes}
 
-    # Game-side base lookup, keyed on display name.
+    # Game-side base lookup, keyed on display name — the live row wherever several share one.
     game_by_name: dict[str, dict] = {}
+    superseded = 0
     for b in bases:
         name = b.get("Name")
-        if name:
-            game_by_name.setdefault(name, b)
+        if not name:
+            continue
+        held = game_by_name.get(name)
+        if held is None:
+            game_by_name[name] = b
+        elif _liveness(b) > _liveness(held):
+            game_by_name[name] = b
+            superseded += 1
 
     armour_by_base = {a["BaseItemTypesKey"]: a for a in armour
                       if a.get("BaseItemTypesKey") is not None}
@@ -105,7 +137,7 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
         counts[r["namespace"]] = counts.get(r["namespace"], 0) + 1
 
     return deduped, {"records": len(deduped), "enriched_from_game_data": enriched,
-                     "by_namespace": counts}
+                     "superseded_rows_passed_over": superseded, "by_namespace": counts}
 
 
 def build_classes(classes: list[dict], category_options: dict[str, str]) -> list[dict]:

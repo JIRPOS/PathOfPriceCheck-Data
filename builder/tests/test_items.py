@@ -1,0 +1,58 @@
+from ppcdata.emit import items as emit_items
+
+
+def _trade(*names: str) -> dict:
+    """Names in the shape ``/api/trade/data/items`` returns them."""
+    return {"result": [{"id": "", "entries": [{"name": n, "type": n} for n in names]}]}
+
+
+def _base(index: int, name: str, ident: str, domain: int) -> dict:
+    return {"_index": index, "Name": name, "Id": ident, "ModDomain": domain,
+            "ItemClassesKey": 38}
+
+
+def _build(bases):
+    names = sorted({b["Name"] for b in bases})
+    records, stats = emit_items.build(_trade(*names), bases, [], [], [])
+    return {r["name"]: r.get("metadataId") for r in records}, stats
+
+
+# GGG keeps the superseded row when a base is replaced, so both of these names have two rows.
+# Only the live one's id is ever named by the currency-exchange feed, and the table's own
+# order puts the dead one first.
+SUPERSEDED = [
+    _base(2973, "Sacrifice at Dawn", "Metadata/Items/MapFragments/VaalFragment1_2", 14),
+    _base(2995, "Sacrifice at Dawn", "Metadata/Items/MapFragments/CurrencyVaalFragment1_2",
+          43),
+    # Both rows of this pair are in the stackable domain, so the id's own marker is the only
+    # thing that separates them.
+    _base(4681, "Echo of Trauma", "Metadata/Items/MapFragments/AtlasMemory/QuestFearKey", 43),
+    _base(4682, "Echo of Trauma", "Metadata/Items/MapFragments/AtlasMemory/CurrencyFearKey",
+          43),
+]
+
+
+def test_a_replaced_base_is_emitted_under_the_id_that_still_trades():
+    ids, stats = _build(SUPERSEDED)
+    assert ids["Sacrifice at Dawn"] == "Metadata/Items/MapFragments/CurrencyVaalFragment1_2"
+    assert ids["Echo of Trauma"] == \
+        "Metadata/Items/MapFragments/AtlasMemory/CurrencyFearKey"
+    assert stats["superseded_rows_passed_over"] == 2
+
+
+def test_the_live_row_wins_whichever_order_the_table_holds_it_in():
+    ids, _ = _build(list(reversed(SUPERSEDED)))
+    assert ids["Sacrifice at Dawn"] == "Metadata/Items/MapFragments/CurrencyVaalFragment1_2"
+    assert ids["Echo of Trauma"] == \
+        "Metadata/Items/MapFragments/AtlasMemory/CurrencyFearKey"
+
+
+def test_rows_that_tie_keep_the_table_order():
+    # Same-named bases that are both live (the Two-Stone Rings, alternate-quality gems) are
+    # not what this rule is about, and it must not start reordering them.
+    ids, stats = _build([
+        _base(1, "Two-Stone Ring", "Metadata/Items/Rings/Ring12", 1),
+        _base(2, "Two-Stone Ring", "Metadata/Items/Rings/Ring13", 1),
+    ])
+    assert ids["Two-Stone Ring"] == "Metadata/Items/Rings/Ring12"
+    assert stats["superseded_rows_passed_over"] == 0
