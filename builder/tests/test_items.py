@@ -56,3 +56,43 @@ def test_rows_that_tie_keep_the_table_order():
     ])
     assert ids["Two-Stone Ring"] == "Metadata/Items/Rings/Ring12"
     assert stats["superseded_rows_passed_over"] == 0
+
+
+# The four shapes trade states a gem in. Only the transfigured ones carry a ``text``, and it
+# is the name the game prints — unlike every other group, where ``text`` is a display
+# composition of the other fields ("Abyssus Ezomyte Burgonet").
+GEMS = {"result": [{"id": "gem", "entries": [
+    {"type": "Empower Support"},
+    {"type": "Vaal Blight"},
+    {"type": "Raise Zombie", "text": "Raise Zombie of Falling", "disc": "alt_y"},
+    {"type": "Vaal Blight", "text": "Vaal Blight (Blight of Atrophy)", "disc": "alt_y"},
+]}]}
+
+
+def test_a_gem_is_keyed_on_the_name_the_game_prints():
+    records, stats = emit_items.build(GEMS, [], [], [], [])
+    by_name = {r["name"]: r for r in records}
+
+    # A transfigured gem: the clipboard prints this name and nothing else, and trade will only
+    # answer to the skill it alters plus the discriminator.
+    assert by_name["Raise Zombie of Falling"]["tradeName"] == "Raise Zombie"
+    assert by_name["Raise Zombie of Falling"]["tradeDisc"] == "alt_y"
+    # A transfigured Vaal gem is stated as the pair, which is what the client rebuilds from
+    # the two names the clipboard prints.
+    assert by_name["Vaal Blight (Blight of Atrophy)"]["tradeName"] == "Vaal Blight"
+    # An ordinary gem is queried under the name it prints, so it carries no second one.
+    assert "tradeName" not in by_name["Empower Support"]
+    assert "tradeName" not in by_name["Vaal Blight"]
+    assert stats["gems_keyed_on_display_name"] == 2
+
+
+def test_a_display_name_outside_the_gem_group_is_left_alone():
+    # Trade's ``text`` elsewhere is a composition, never a name the game prints: keying a
+    # unique on "Abyssus Ezomyte Burgonet" would make it unfindable from the item text.
+    unique = {"result": [{"id": "armour", "entries": [
+        {"type": "Ezomyte Burgonet", "text": "Abyssus Ezomyte Burgonet", "name": "Abyssus",
+         "flags": {"unique": True}}]}]}
+    records, stats = emit_items.build(unique, [], [], [], [])
+    assert records[0]["name"] == "Abyssus"
+    assert "tradeName" not in records[0]
+    assert stats["gems_keyed_on_display_name"] == 0

@@ -72,13 +72,29 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
 
     records: list[dict] = []
     enriched = 0
+    gem_display = 0
     for e in item_entries(trade_items):
         ns = _namespace(e)
         name = e.get("name") or e.get("type")
         if not name:
             continue
 
+        # Gems are the one group whose ``text`` is the name the *game* prints rather than a
+        # display composition of the other fields ("Abyssus Ezomyte Burgonet", "Blighted Map
+        # (Strand)"). Trade files a transfigured gem under the skill it alters — "Raise Zombie
+        # of Falling" is ``Raise Zombie`` with the ``alt_y`` discriminator — so its ``type`` is
+        # a name no clipboard ever prints, and keying the record on it left every transfigured
+        # gem unfindable from the item text. Key on what the game prints and carry the query
+        # term beside it. A Vaal transfigured gem's is the pair, "Vaal Blight (Blight of
+        # Atrophy)", which is also exactly what poe.ninja lists it as.
+        trade_name = ""
+        if ns == "GEM" and e.get("text") and e["text"] != name:
+            trade_name, name = name, e["text"]
+            gem_display += 1
+
         rec: dict = {"name": name, "refName": name, "namespace": ns}
+        if trade_name:
+            rec["tradeName"] = trade_name
         if e.get("disc"):
             rec["tradeDisc"] = e["disc"]
 
@@ -137,7 +153,8 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
         counts[r["namespace"]] = counts.get(r["namespace"], 0) + 1
 
     return deduped, {"records": len(deduped), "enriched_from_game_data": enriched,
-                     "superseded_rows_passed_over": superseded, "by_namespace": counts}
+                     "superseded_rows_passed_over": superseded,
+                     "gems_keyed_on_display_name": gem_display, "by_namespace": counts}
 
 
 def build_classes(classes: list[dict], category_options: dict[str, str]) -> list[dict]:
