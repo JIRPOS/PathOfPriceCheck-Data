@@ -3,6 +3,7 @@
     python -m ppcdata build   --out out/ [--patch X] [--workdir .work/]
     python -m ppcdata verify  --out out/
     python -m ppcdata vectors --out out/
+    python -m ppcdata crawl-exchange [--backfill-from 1722027600]
 """
 
 from __future__ import annotations
@@ -21,9 +22,14 @@ from .emit import items as emit_items
 from .emit import manifest as emit_manifest
 from .emit import stats as emit_stats
 from .emit import unique_mods as emit_unique_mods
-from .sources import game_bundle, patch as patch_src, trade_api, wiki
+from .sources import exchange, game_bundle, patch as patch_src, trade_api, wiki
 
 LANG = "en"
+
+# Committed to the repo, not cached: an evictable cache would silently restart a 17.8k-request
+# backfill inside a CI job that budgets for six requests. The diff is also the review surface
+# for which items newly started trading.
+DEFAULT_EXCHANGE_STATE = "state/exchange-seen.json"
 
 
 def _write_ndjson(path: Path, records: list[dict]) -> list[tuple[str, int]]:
@@ -102,10 +108,31 @@ def cmd_build(args: argparse.Namespace) -> int:
         print("Fix or remove them — a table that matches nothing reads as if it worked.")
         return 1
 
+    exchange_state = Path(args.exchange_state).resolve()
+    if args.skip_exchange_crawl:
+        print(f"reusing the currency-exchange cursor in {exchange_state}")
+        xstats = {}
+    else:
+        print("crawling the currency exchange ...")
+        # Never fails the build. A feed outage leaves the cursor where it was and the previous
+        # flags keep serving, which is the `--allow-stale-wiki` precedent: a source being down
+        # costs that source its freshness, not the whole bundle.
+        xstats = exchange.crawl(exchange_state, delay=args.exchange_delay)
+        for k, v in xstats.items():
+            if v:
+                print(f"  {k}: {v}")
+    exchange_ids = exchange.seen_ids(exchange_state)
+    print(f"  {len(exchange_ids)} items have traded on the currency exchange")
+
     print("building items.ndjson ...")
-    item_records, istats = emit_items.build(trade_items, bases, classes, armour, tags)
+    item_records, istats = emit_items.build(trade_items, bases, classes, armour, tags,
+                                            exchange_ids)
+    unmatched = istats.pop("_exchange_ids_unmatched")
     for k, v in istats.items():
         print(f"  {k}: {v}")
+    if unmatched:
+        print(f"  exchange ids matching no base: {len(unmatched)}"
+              f" (e.g. {', '.join(unmatched[:3])})")
 
     print("building unique-mods.ndjson ...")
     wiki_cache = work / "wiki" / "item_mods.json"
@@ -182,13 +209,20 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     data_version = args.data_version or _dt.datetime.now(_dt.UTC).strftime("%Y%m%d") + ".0"
     generated_at = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    m = emit_manifest.build(out, data_version, game_patch, generated_at,
-                            {"trade_stats_last_modified": stats_lm,
-                             "trade_items_last_modified": items_lm,
-                             # Attribution travels with the data, not just with this repo.
-                             "unique_mods_attribution": wiki.ATTRIBUTION,
-                             "unique_mods_from_cache": wiki_cached},
-                            tag=args.tag)
+    source = {"trade_stats_last_modified": stats_lm,
+              "trade_items_last_modified": items_lm,
+              # Attribution travels with the data, not just with this repo.
+              "unique_mods_attribution": wiki.ATTRIBUTION,
+              "unique_mods_from_cache": wiki_cached}
+    # Only when there is a dataset. This is what lets the client tell "this bundle predates the
+    # exchange flags" from "this item does not trade there" — an item-level boolean cannot say
+    # so on its own, and reading a missing flag as "no" would put every currency item back into
+    # the empty-panel case this whole dataset exists to fix. A crawl that has produced nothing
+    # is indistinguishable from no crawl, and saying so is the honest reading.
+    if exchange_ids:
+        source["exchange_items"] = len(exchange_ids)
+        source["exchange_through_hour"] = exchange.load_state(exchange_state)["last_hour"]
+    m = emit_manifest.build(out, data_version, game_patch, generated_at, source, tag=args.tag)
     emit_manifest.write(out, m)
 
     total = sum(f["size"] for f in m["files"])
@@ -287,6 +321,25 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 1 if bad else 0
 
 
+def cmd_crawl_exchange(args: argparse.Namespace) -> int:
+    """Advance the currency-exchange cursor on its own, without building a bundle.
+
+    This is how the one-off backfill from Settlers launch is run — 17.8k requests, about
+    2.3 GB gzipped and a couple of hours — and it is deliberately not something CI does. The
+    build calls the same crawl for the six hours it is behind by.
+    """
+    path = Path(args.state).resolve()
+    print(f"crawling the currency exchange into {path}")
+    stats = exchange.crawl(path, backfill_from=args.backfill_from, until=args.until,
+                           delay=args.delay, progress=True)
+    for k, v in stats.items():
+        if v or k in ("hours_crawled", "exchange_ids"):
+            print(f"  {k}: {v}")
+    # An interrupted or blocked crawl is not a failed one: the cursor is exactly as far as it
+    # got, and re-running resumes there.
+    return 0
+
+
 def cmd_vectors(args: argparse.Namespace) -> int:
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -362,6 +415,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="on a failed poewiki fetch, fall back to the cached mapping")
     b.add_argument("--reuse-wiki", action="store_true",
                    help="do not fetch poewiki at all; use the cached mapping")
+    b.add_argument("--exchange-state", default=DEFAULT_EXCHANGE_STATE)
+    b.add_argument("--exchange-delay", type=float, default=0.1,
+                   help="seconds between currency-exchange requests")
+    b.add_argument("--skip-exchange-crawl", action="store_true",
+                   help="do not advance the currency-exchange cursor; use it as committed")
     b.set_defaults(fn=cmd_build)
 
     v = sub.add_parser("verify")
@@ -377,6 +435,16 @@ def main(argv: list[str] | None = None) -> int:
     x = sub.add_parser("vectors")
     x.add_argument("--out", default="out")
     x.set_defaults(fn=cmd_vectors)
+
+    c = sub.add_parser("crawl-exchange")
+    c.add_argument("--state", default=DEFAULT_EXCHANGE_STATE)
+    c.add_argument("--backfill-from", type=int, default=None,
+                   help=f"walk from this unix hour; the feed starts at {exchange.FIRST_HOUR}")
+    c.add_argument("--until", type=int, default=None,
+                   help="stop at this unix hour instead of the newest published one")
+    c.add_argument("--delay", type=float, default=0.1,
+                   help="seconds between requests")
+    c.set_defaults(fn=cmd_crawl_exchange)
 
     args = ap.parse_args(argv)
     return args.fn(args)

@@ -14,7 +14,7 @@ build, not a new binary.
 | asset | what it is |
 |---|---|
 | `manifest.json` | schema/data version, game patch, per-file sha256 and size, absolute URLs |
-| `en-items.ndjson` | base types, uniques, gems, divination cards, captured beasts |
+| `en-items.ndjson` | base types, uniques, gems, divination cards, captured beasts — including each base's `Metadata/Items/…` id and whether it has ever traded on the in-game currency exchange |
 | `en-items-name.index.bin` | fnv1a32 index, key `"{namespace}::{name}"` |
 | `en-items-ref.index.bin` | fnv1a32 index, key `"{namespace}::{refName}"` |
 | `en-items-base.index.bin` | fnv1a32 index over uniques only, key `"UNIQUE::{unique.base}"` — which uniques drop on a base, which is all an unidentified one states |
@@ -40,7 +40,8 @@ later as something the client either understands or refuses, rather than as a fo
 
 ## Where the data comes from
 
-Two sources for everything except the unique-mod dataset, joined on the normalized wording:
+Two sources for everything except the unique-mod dataset and the exchange flag, joined on the
+normalized wording:
 
 * **The game's own files.** [`pathofexile-dat`](https://github.com/SnosMe/poe-dat-viewer)
   downloads GGG's `.datc64` bundles straight from the patch CDN and decodes them with
@@ -58,6 +59,39 @@ hashes.
 The join key is the `#`-placeholder form of the wording — see
 [NORMALIZATION.md](NORMALIZATION.md), which the client reimplements and is tested against
 the vectors shipped in every release.
+
+### The fourth source: which items trade on the currency exchange
+
+`en-items.ndjson` carries `exchange: true` on every base that has **ever** appeared in a market on
+GGG's in-game currency exchange. That is one boolean and no new asset, but it answers a question
+nothing else can.
+
+The app prices a stack of currency, a scarab, an essence or a card off
+[the exchange feed](https://web.poecdn.com/api/currency-exchange) rather than off the trade site,
+because an exchange market is not a listing. That feed is published as **hourly digests**, so it can
+only ever say whether an item traded *in the last hour* — and for a thin item, a Weeping Essence of
+Greed, no trades in a given hour is the normal case rather than an answer. Without this flag the
+app could not tell "this is not traded on the exchange" from "nobody traded one recently", and
+since poe.ninja has no price for such an item either, the price check came back saying nothing at
+all. "Has this item ever traded there" is a property of the item, so it belongs in the bundle.
+
+`sources/exchange.py` crawls the feed forward from a cursor committed to the repo at
+`builder/state/exchange-seen.json` (`{"last_hour": …, "ids": [...]}`). Committed rather than cached:
+an Actions cache is evictable, and a silent eviction would restart a 17.8k-hour backfill inside a
+job that budgets for six requests. The diff is also the review surface for which items newly
+started trading. Two rules keep it honest — never advance past an hour that was not actually read,
+and treat an hour still empty several hours after it ended as a real gap in GGG's history rather
+than waiting for it forever.
+
+The feed is public, unauthenticated and on the CDN, so there is no rate-limit policy to honour;
+what stands in for one is that a published hour never changes (`max-age` is a year), so nothing is
+ever re-fetched. The steady-state cost is six requests per build. The one-off backfill from
+Settlers launch is run locally, once — `python -m ppcdata crawl-exchange --backfill-from 1722027600`
+— and is resumable, because 17.8k requests will be interrupted.
+
+The manifest carries `source.exchange_items`, the size of the set. That is what lets the client
+tell a bundle published before this dataset from one where a missing flag genuinely means the item
+does not trade there; an item-level boolean cannot say so on its own.
 
 ### The third source, and why there has to be one
 
@@ -119,6 +153,17 @@ python -m ppcdata build --out ../out --reuse-wiki     # reuse the cached poewiki
 
 `--allow-stale-wiki` (which CI passes) falls back to the cached mapping when the wiki fetch
 fails instead of failing the build; `--reuse-wiki` skips the fetch outright.
+`--skip-exchange-crawl` uses the committed exchange cursor without advancing it.
+
+The one-off currency-exchange backfill, run once and locally — not in CI:
+
+```sh
+python -m ppcdata crawl-exchange --backfill-from 1722027600
+```
+
+Roughly 17.8k requests and a couple of hours, resumable at any point, and about 100 KB of
+committed state at the end. Afterwards the build's own crawl only has the six hours since the
+last one to catch up on.
 
 The build is deterministic: two runs produce byte-identical data files. Only
 `manifest.json` differs, because it carries timestamps.
@@ -133,6 +178,12 @@ When nothing changed it publishes nothing.
 A failed build publishes nothing and the previous release keeps serving. That is deliberate:
 a partial bundle is worse than a stale one.
 
+Each run also advances the currency-exchange cursor by the six hours since the last one and
+commits `builder/state/exchange-seen.json` back, whether or not a bundle is published — the
+hours were crawled either way. A feed outage leaves the cursor where it was and the previous
+flags keep serving, the same way `--allow-stale-wiki` degrades the unique-mod dataset rather
+than the whole build.
+
 ## Caveats
 
 * `constants/known_stats.py` holds the handful of facts neither source states — chiefly
@@ -142,6 +193,11 @@ a partial bundle is worse than a stale one.
   text as their single matcher. That is correct for namespaces the client never renders
   (crucible mod text, veiled affix names, gem support text) and a known gap elsewhere.
 * Icons are stored as CDN URL strings. No game art is redistributed.
+* **English only.** Every asset is language-prefixed and `manifest.json` declares a `languages`
+  list, so the format has always anticipated more — but `LANG` is `"en"`, only the English
+  `stat_descriptions.txt` files are fetched, and no other language is built. Adding one means
+  pulling GGG's localised description files and emitting a second set of assets; nothing in the
+  schema has to change for it.
 * The wiki lags a league launch by days. A new unique simply has no `en-unique-mods.ndjson`
   record until it does, and the app must degrade to "no pool data" rather than to a wrong
   filter. The wiki also sits behind a bot challenge that answers HTML instead of JSON: CI
@@ -153,6 +209,14 @@ a partial bundle is worse than a stale one.
 * Forbidden Flame / Forbidden Flesh are a known gap: their one mod grants a hidden stat, and
   trade searches them through an *option* stat the join does not reach. They get a record with
   no mods rather than a wrong one.
+* The exchange flag is **evidence of trade, never proof of its absence**. An item that has simply
+  never been traded in any hour since Settlers launch is indistinguishable from one that cannot be
+  traded there, and both come out unflagged. That is the safe direction: an unflagged item keeps
+  its trade search, and the flag only ever removes a search that could not have worked.
+* A handful of ids the feed names match no base. Expected and non-zero — the feed covers private
+  leagues and items the trade API does not list, and a base retired since it last traded keeps its
+  id in the set — so the build reports the count rather than failing on it. A number that jumps is
+  the signal that the id join has drifted.
 
 ## Credits
 

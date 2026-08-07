@@ -99,6 +99,28 @@ jobs:
         working-directory: builder
         run: python -m ppcdata verify --out ../out
 
+      # The cursor is committed, not cached: an evictable cache would silently restart the
+      # 17.8k-hour backfill inside a job that budgets for the six hours since the last run. The
+      # diff is also the review surface for which items newly started trading. Pushed whether or
+      # not a bundle is published — the hours were crawled either way, and re-crawling them next
+      # run would be the only alternative.
+      - name: Commit the currency-exchange cursor
+        run: |
+          if git diff --quiet -- builder/state/exchange-seen.json; then
+            echo "Cursor unchanged."; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add builder/state/exchange-seen.json
+          git commit -m "chore: advance the currency-exchange cursor"
+          # A concurrent push is normal here; rebase and retry rather than failing the build over
+          # bookkeeping, and never take the whole run down for it.
+          for i in 1 2 3; do
+            git pull --rebase --quiet && git push && exit 0
+            sleep $((i * 5))
+          done
+          echo "::warning::could not push the exchange cursor; next run re-crawls those hours"
+
       # Inputs churn without outputs changing — GGG re-serves identical bodies — so compare
       # the output hashes, not the sources. That is the honest gate for "publish or not".
       - name: Decide whether to publish

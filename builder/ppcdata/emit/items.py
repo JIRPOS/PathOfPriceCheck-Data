@@ -50,7 +50,8 @@ def _liveness(row: dict) -> tuple[bool, bool]:
 
 
 def build(trade_items: dict, bases: list[dict], classes: list[dict],
-          armour: list[dict], tags: list[dict]) -> tuple[list[dict], dict]:
+          armour: list[dict], tags: list[dict],
+          exchange_ids: set[str] | None = None) -> tuple[list[dict], dict]:
     class_name_by_row = {c["_index"]: c.get("Name") or c.get("Id") for c in classes}
 
     # Game-side base lookup, keyed on display name — the live row wherever several share one.
@@ -70,6 +71,8 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
     armour_by_base = {a["BaseItemTypesKey"]: a for a in armour
                       if a.get("BaseItemTypesKey") is not None}
 
+    exchange_ids = exchange_ids or set()
+    exchange_matched: set[str] = set()
     records: list[dict] = []
     enriched = 0
     gem_display = 0
@@ -116,6 +119,16 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
                 # a client join the two.
                 if g.get("Id"):
                     rec["metadataId"] = g["Id"]
+                    # Whether this item has *ever* traded on the in-game currency exchange —
+                    # a fact about the item, unlike the hourly digest the client reads, which
+                    # can only say whether one traded in the last hour. Without it the client
+                    # cannot tell "not traded on the exchange" from "nobody traded one this
+                    # hour", and for a thin item (a Weeping Essence of Greed) the second is
+                    # the normal case: poe.ninja has no price for one either, so the check
+                    # comes back saying nothing at all. See sources/exchange.py.
+                    if g["Id"] in exchange_ids:
+                        rec["exchange"] = True
+                        exchange_matched.add(g["Id"])
                 cat = class_name_by_row.get(g.get("ItemClassesKey"))
                 if cat:
                     rec["craftable"] = {"category": cat}
@@ -158,9 +171,20 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
     for r in deduped:
         counts[r["namespace"]] = counts.get(r["namespace"], 0) + 1
 
+    # Counted after the dedup, so it says how many *records* carry the flag rather than how
+    # many times it was set: trade lists the same base under several groups.
+    flagged = sum(1 for r in deduped if r.get("exchange"))
+
     return deduped, {"records": len(deduped), "enriched_from_game_data": enriched,
                      "superseded_rows_passed_over": superseded,
-                     "gems_keyed_on_display_name": gem_display, "by_namespace": counts}
+                     "gems_keyed_on_display_name": gem_display,
+                     "traded_on_currency_exchange": flagged,
+                     # Ids the feed named that no base carries. Expected to be small and
+                     # non-zero: the feed covers leagues and items the trade API does not
+                     # list, and a base retired since it last traded keeps its id in the set.
+                     # A number that jumps is the signal that the id join has drifted.
+                     "_exchange_ids_unmatched": sorted(exchange_ids - exchange_matched),
+                     "by_namespace": counts}
 
 
 def build_classes(classes: list[dict], category_options: dict[str, str]) -> list[dict]:
