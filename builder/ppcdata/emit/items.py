@@ -87,6 +87,12 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
         # gem unfindable from the item text. Key on what the game prints and carry the query
         # term beside it. A Vaal transfigured gem's is the pair, "Vaal Blight (Blight of
         # Atrophy)", which is also exactly what poe.ninja lists it as.
+        #
+        # This drops ``enriched_from_game_data`` by exactly ``gem_display`` — 3636 to 3373 on
+        # the release that introduced it — and that is the fix working rather than a
+        # regression. No BaseItemTypes row is named "Raise Zombie of Falling", so those records
+        # now match nothing; before, they matched the row for the *base* skill and were handed
+        # a metadataId, an item class and a drop level belonging to a different item.
         trade_name = ""
         if ns == "GEM" and e.get("text") and e["text"] != name:
             trade_name, name = name, e["text"]
