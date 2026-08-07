@@ -94,6 +94,9 @@ def cmd_build(args: argparse.Namespace) -> int:
     tags = game_bundle.table(work, "Tags")
     mods = game_bundle.table(work, "Mods")
     game_stats = game_bundle.table(work, "Stats")
+    stash_layout = game_bundle.table(work, "UniqueStashLayout")
+    words = game_bundle.table(work, "Words")
+    visuals = game_bundle.table(work, "ItemVisualIdentity")
 
     print("building stats.ndjson ...")
     stat_records, sstats = emit_stats.build(trade_stats, descs, {
@@ -126,7 +129,8 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     print("building items.ndjson ...")
     item_records, istats = emit_items.build(trade_items, bases, classes, armour, tags,
-                                            exchange_ids)
+                                            exchange_ids,
+                                            emit_items.unique_art(stash_layout, words, visuals))
     unmatched = istats.pop("_exchange_ids_unmatched")
     for k, v in istats.items():
         print(f"  {k}: {v}")

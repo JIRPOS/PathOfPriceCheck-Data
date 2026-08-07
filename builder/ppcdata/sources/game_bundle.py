@@ -44,6 +44,15 @@ TABLES = [
     {"name": "BaseItemTypes", "columns": [
         "Id", "Name", "ItemClassesKey", "Width", "Height", "DropLevel",
         "TagsKeys", "Implicit_ModsKeys", "IsCorrupted", "InheritsFrom", "ModDomain"]},
+    # A unique's artwork, which GGG's own CDN serves at the DDS path with a .png extension:
+    # https://web.poecdn.com/image/Art/2DItems/Armours/Gloves/Hrimsorrow.png. A unique is not a
+    # row in BaseItemTypes — it is a name, a base and a mod list assembled at drop time — so the
+    # only join that reaches its art is the unique stash tab's layout, where `Words` holds the
+    # display name the client prints and the clipboard repeats.
+    {"name": "ItemVisualIdentity", "columns": ["DDSFile"]},
+    {"name": "UniqueStashLayout", "columns": [
+        "WordsKey", "ItemVisualIdentityKey", "IsAlternateArt"]},
+    {"name": "Words", "columns": ["Text"]},
     {"name": "Tags", "columns": ["Id"]},
     {"name": "Stats", "columns": ["Id", "IsLocal", "IsWeaponLocal"]},
     # All eight stat slots, not the first six: a unique's mod that granted a seventh stat

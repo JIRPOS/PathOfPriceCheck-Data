@@ -96,3 +96,53 @@ def test_a_display_name_outside_the_gem_group_is_left_alone():
     assert records[0]["name"] == "Abyssus"
     assert "tradeName" not in records[0]
     assert stats["gems_keyed_on_display_name"] == 0
+
+
+# The unique stash tab's layout, which is the only place the game says which picture goes with
+# which unique name. Words holds the display name the client prints; the layout points at the
+# visual identity, whose DDSFile is the path GGG's CDN serves the .png at.
+WORDS = [{"Text": "Hrimsorrow"}, {"Text": "Hrimburn"}, {"Text": "Doryani's Fist"}]
+VISUALS = [
+    {"DDSFile": "Art/2DItems/Armours/Gloves/Hrimsorrow.dds"},
+    {"DDSFile": "Art/2DItems/Armours/Gloves/Hrimburn.dds"},
+    {"DDSFile": "Art/2DItems/Armours/Gloves/HrimsorrowFoil.dds"},
+]
+LAYOUT = [
+    {"WordsKey": 0, "ItemVisualIdentityKey": 0, "IsAlternateArt": False},
+    {"WordsKey": 1, "ItemVisualIdentityKey": 1, "IsAlternateArt": False},
+    # The same unique with a different picture. Showing it would show the player something
+    # that does not look like the item in their stash.
+    {"WordsKey": 0, "ItemVisualIdentityKey": 2, "IsAlternateArt": True},
+]
+
+
+def test_a_unique_carries_the_path_its_artwork_is_served_at():
+    art = emit_items.unique_art(LAYOUT, WORDS, VISUALS)
+    # .dds in the bundle, .png on the CDN, same path — the path is emitted to be fetched.
+    assert art["Hrimsorrow"] == "Art/2DItems/Armours/Gloves/Hrimsorrow.png"
+    assert art["Hrimburn"] == "Art/2DItems/Armours/Gloves/Hrimburn.png"
+    # No layout row, so no art: guessing a path from the name would be a 404 per item.
+    assert "Doryani's Fist" not in art
+
+
+def test_alternate_art_never_displaces_the_ordinary_picture():
+    art = emit_items.unique_art(list(reversed(LAYOUT)), WORDS, VISUALS)
+    assert art["Hrimsorrow"] == "Art/2DItems/Armours/Gloves/Hrimsorrow.png"
+
+
+def test_only_uniques_are_given_art_and_only_where_there_is_some():
+    trade = {"result": [{"id": "armour", "entries": [
+        {"name": "Hrimsorrow", "type": "Goathide Gloves", "flags": {"unique": True}},
+        {"name": "Doryani's Fist", "type": "Ambush Mitts", "flags": {"unique": True}},
+        {"name": "Goathide Gloves", "type": "Goathide Gloves"},
+    ]}]}
+    records, stats = emit_items.build(
+        trade, [], [], [], [], None, emit_items.unique_art(LAYOUT, WORDS, VISUALS))
+    by_name = {r["name"]: r for r in records}
+    assert by_name["Hrimsorrow"]["art"] == "Art/2DItems/Armours/Gloves/Hrimsorrow.png"
+    # A unique the layout does not carry, and a plain base, which has its own art nobody asked
+    # for: the client needs a picture only where it has to show *which* unique this is.
+    assert "art" not in by_name["Doryani's Fist"]
+    assert "art" not in by_name["Goathide Gloves"]
+    assert stats["uniques_with_art"] == 1
+    assert stats["uniques_without_art"] == 1

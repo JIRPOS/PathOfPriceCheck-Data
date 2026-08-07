@@ -49,9 +49,48 @@ def _liveness(row: dict) -> tuple[bool, bool]:
             last.startswith("Currency") or "Stackable" in last)
 
 
+def unique_art(stash_layout: list[dict], words: list[dict],
+               visuals: list[dict]) -> dict[str, str]:
+    """Unique display name -> the artwork's path on GGG's CDN, ``Art/2DItems/....png``.
+
+    A unique has no row of its own in ``BaseItemTypes``: it is a name, a base and a mod list
+    put together when the item drops. The one place the game states *which picture* goes with
+    which name is the unique stash tab's layout, joining ``Words.Text`` — the display name the
+    client prints, and therefore the one the clipboard repeats — to ``ItemVisualIdentity``.
+
+    The file is a ``.dds`` in the game bundle and a ``.png`` on the CDN at the same path, which
+    is what is emitted: the path is published to be fetched, not to describe the bundle.
+
+    **Alternate-art rows are skipped.** They are the same unique with a different picture (the
+    foil and race-reward variants), and one of those in place of the ordinary art would show
+    the player something that does not look like the item in their stash. Ordinary rows come
+    first for the same reason: whichever the layout lists first wins, so a later alternate can
+    never displace one.
+
+    Around 110 of trade's uniques have no row here at all — the sanctum relics, the Harbinger
+    pieces, a handful renamed out of the client's word list — and they simply get no art. That
+    is the whole of what the game says on the subject; guessing a path from the name would be
+    a 404 per candidate.
+    """
+    out: dict[str, str] = {}
+    for row in stash_layout:
+        if row.get("IsAlternateArt"):
+            continue
+        wk, vk = row.get("WordsKey"), row.get("ItemVisualIdentityKey")
+        if wk is None or vk is None or wk >= len(words) or vk >= len(visuals):
+            continue
+        name = words[wk].get("Text")
+        dds = visuals[vk].get("DDSFile")
+        if not name or not dds or not dds.endswith(".dds"):
+            continue
+        out.setdefault(name, dds[:-len(".dds")] + ".png")
+    return out
+
+
 def build(trade_items: dict, bases: list[dict], classes: list[dict],
           armour: list[dict], tags: list[dict],
-          exchange_ids: set[str] | None = None) -> tuple[list[dict], dict]:
+          exchange_ids: set[str] | None = None,
+          art_by_unique: dict[str, str] | None = None) -> tuple[list[dict], dict]:
     class_name_by_row = {c["_index"]: c.get("Name") or c.get("Id") for c in classes}
 
     # Game-side base lookup, keyed on display name — the live row wherever several share one.
@@ -72,6 +111,7 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
                       if a.get("BaseItemTypesKey") is not None}
 
     exchange_ids = exchange_ids or set()
+    art_by_unique = art_by_unique or {}
     exchange_matched: set[str] = set()
     records: list[dict] = []
     enriched = 0
@@ -109,6 +149,11 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
 
         if ns == "UNIQUE":
             rec["unique"] = {"base": e.get("type", "")}
+            # The picture, for a client that has to *show* a unique rather than name it — an
+            # unidentified one states only its base, and which of that base's uniques it is
+            # can only be answered by looking at it.
+            if art := art_by_unique.get(name):
+                rec["art"] = art
         else:
             g = game_by_name.get(name)
             if g:
@@ -174,10 +219,16 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
     # Counted after the dedup, so it says how many *records* carry the flag rather than how
     # many times it was set: trade lists the same base under several groups.
     flagged = sum(1 for r in deduped if r.get("exchange"))
+    with_art = sum(1 for r in deduped if r.get("art"))
 
     return deduped, {"records": len(deduped), "enriched_from_game_data": enriched,
                      "superseded_rows_passed_over": superseded,
                      "gems_keyed_on_display_name": gem_display,
+                     # Both halves, because the gap is the number worth watching: the art join
+                     # is on a display name, and a rename upstream would show up here as
+                     # uniques quietly losing their picture.
+                     "uniques_with_art": with_art,
+                     "uniques_without_art": counts.get("UNIQUE", 0) - with_art,
                      "traded_on_currency_exchange": flagged,
                      # Ids the feed named that no base carries. Expected to be small and
                      # non-zero: the feed covers leagues and items the trade API does not

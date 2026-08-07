@@ -14,7 +14,7 @@ build, not a new binary.
 | asset | what it is |
 |---|---|
 | `manifest.json` | schema/data version, game patch, per-file sha256 and size, absolute URLs |
-| `en-items.ndjson` | base types, uniques, gems, divination cards, captured beasts — including each base's `Metadata/Items/…` id and whether it has ever traded on the in-game currency exchange |
+| `en-items.ndjson` | base types, uniques, gems, divination cards, captured beasts — including each base's `Metadata/Items/…` id, whether it has ever traded on the in-game currency exchange, and each unique's artwork path |
 | `en-items-name.index.bin` | fnv1a32 index, key `"{namespace}::{name}"` |
 | `en-items-ref.index.bin` | fnv1a32 index, key `"{namespace}::{refName}"` |
 | `en-items-base.index.bin` | fnv1a32 index over uniques only, key `"UNIQUE::{unique.base}"` — which uniques drop on a base, which is all an unidentified one states |
@@ -92,6 +92,28 @@ Settlers launch is run locally, once — `python -m ppcdata crawl-exchange --bac
 The manifest carries `source.exchange_items`, the size of the set. That is what lets the client
 tell a bundle published before this dataset from one where a missing flag genuinely means the item
 does not trade there; an item-level boolean cannot say so on its own.
+
+### A unique's artwork
+
+`en-items.ndjson` carries `art` on every unique the game has a picture for — the path GGG's own
+CDN serves it at, so the client fetches
+`https://web.poecdn.com/image/Art/2DItems/Armours/Gloves/Hrimsorrow.png` (with `?w=&h=&scale=1`
+where it knows the base's inventory size) and no third party is involved.
+
+It is here because an **unidentified** unique states only its base, and which of that base's
+uniques it is can only be answered by looking at the item: a Prismatic Jewel is seven different
+uniques and a Cobalt Jewel fifty-four. A picker that only names them is a list of words for an
+item the player recognises by its picture.
+
+A unique is not a row in `BaseItemTypes` — it is a name, a base and a mod list assembled when the
+item drops — so the only join that reaches a picture is `UniqueStashLayout`, where `Words.Text`
+is the display name the client prints and the clipboard repeats. Alternate-art rows are skipped:
+they are the foil and race-reward variants of the same unique, and one of those in place of the
+ordinary art shows the player something that does not look like the item in their stash. **1416
+of trade's 1526 uniques** have a row; the rest — sanctum relics, the Harbinger pieces, a few
+renamed out of the client's word list — get nothing, because guessing a path from the name would
+be a 404 per item. Two uniques sharing one picture is not a bug, and the game data says so
+outright: Hrimburn and Hrimsorrow both point at `Hrimsorrow.dds`.
 
 ### The third source, and why there has to be one
 
