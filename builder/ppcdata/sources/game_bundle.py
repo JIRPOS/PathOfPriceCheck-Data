@@ -69,7 +69,18 @@ TABLES = [
         "EnergyShieldMin", "EnergyShieldMax", "WardMin", "WardMax"]},
     {"name": "WeaponTypes", "columns": [
         "BaseItemTypesKey", "DamageMin", "DamageMax", "Speed", "Critical", "RangeMax"]},
+    # The two tables a stat description can render a value *out of* rather than print. A mod
+    # rolling "+3 to Level of all <one of 287 gems>" stores the gem as a row number here, and
+    # without these the wording stays "+# to Level of all # Gems" — which trade indexes under
+    # no id at all, because it indexes one id per gem. The name column differs between the two
+    # tables; that is GGG's shape, not a typo here.
+    {"name": "IndexableSkillGems", "columns": ["Name1"]},
+    {"name": "IndexableSupportGems", "columns": ["Name"]},
 ]
+
+#: statdesc's table name -> (dat table, its display-name column).
+INDEXABLE_TABLES = {"skill": ("IndexableSkillGems", "Name1"),
+                    "support": ("IndexableSupportGems", "Name")}
 
 
 def write_config(workdir: Path, patch: str, files: list[str]) -> None:
@@ -130,6 +141,20 @@ def table(workdir: Path, name: str) -> list[dict]:
     if not p.exists():
         raise FileNotFoundError(f"table not extracted: {p}")
     return json.loads(p.read_text())
+
+
+def indexable_names(workdir: Path) -> dict[str, list[str]]:
+    """``{"skill": [...], "support": [...]}`` — display names by row, in row order.
+
+    A stat's value is the row number **one-based**, so row 0 is value 1. That is not an
+    assumption: the game prints the whole range of such a roll as its first and last name,
+    and "(Fireball-Mana-Infused Staff)" is rows 0 and 286 of a 287-row table against a mod
+    whose range is 1..287.
+    """
+    out: dict[str, list[str]] = {}
+    for kind, (name, column) in INDEXABLE_TABLES.items():
+        out[kind] = [r[column] for r in table(workdir, name)]
+    return out
 
 
 def stat_descriptions_path(workdir: Path) -> Path:
