@@ -59,6 +59,48 @@ def strip_empty_parens(line: str) -> str:
     return line.replace("()", "")
 
 
+def strip_named_ranges(line: str) -> str:
+    """Drop every advanced-mod-description range whose roll is a *name*.
+
+    A modifier can roll over a list instead of over an interval — "Maximum number of
+    Sentinels of Purity (Animated Weapons-Holy Armaments) is Doubled" rolls over the minion
+    skill gems, and the parenthesis is the first and last of that list exactly as "(50-100)"
+    is the first and last of an interval. ``scan_numbers`` cannot see it: there is no numeric
+    token in front of it to carry the bounds. The name itself is the roll and the trade
+    wording spells it out, so the range is dropped rather than placeheld.
+
+    Only a group whose two halves are both non-numeric, and that does not follow a number,
+    qualifies — a numeric token's own range belongs to that token.
+    """
+    out: list[str] = []
+    i, n = 0, len(line)
+    while i < n:
+        if line[i] != "(":
+            out.append(line[i])
+            i += 1
+            continue
+        close = line.find(")", i)
+        # A range that follows a number is that number's own, numeric bounds or not.
+        prev = out[-1] if out else ""
+        if close == -1 or _is_digit(prev) or prev == ")":
+            out.append(line[i])
+            i += 1
+            continue
+        inner = line[i + 1 : close]
+        # The same split as a numeric range: one arbitrary character, then the separator.
+        sep = inner.find("-", 1) if len(inner) > 1 else -1
+        if (sep == -1 or sep + 1 >= len(inner)
+                or _as_float(inner[:sep]) is not None
+                or _as_float(inner[sep + 1 :]) is not None):
+            out.append(line[i])
+            i += 1
+            continue
+        if prev == " ":
+            out.pop()
+        i = close + 1
+    return "".join(out)
+
+
 def scan_numbers(line: str) -> list[NumberToken]:
     """Find every numeric token, in order.
 
@@ -151,17 +193,27 @@ def candidates(line: str) -> list[str]:
     """Every lookup candidate for ``line``, most-generic first, duplicates removed.
 
     The raw line is always the last resort, so a wording with no numbers at all still
-    resolves.
+    resolves. A line carrying a named range is enumerated twice, as printed and then
+    stripped, so a wording that really does contain a parenthesis still wins as itself.
     """
-    text = strip_empty_parens(line)
-    tokens = scan_numbers(text)[:MAX_TOKENS]
     out: list[str] = []
-    for keep in CANDIDATE_MASKS[len(tokens)]:
-        c = apply_candidate(text, tokens, keep)
-        if c not in out:
-            out.append(c)
-    if text not in out:
-        out.append(text)
+
+    def enumerate_masks(text: str) -> None:
+        tokens = scan_numbers(text)[:MAX_TOKENS]
+        for keep in CANDIDATE_MASKS[len(tokens)]:
+            c = apply_candidate(text, tokens, keep)
+            if c not in out:
+                out.append(c)
+        if text not in out:
+            out.append(text)
+
+    text = strip_empty_parens(line)
+    enumerate_masks(text)
+    # Only then the named-range form, so a wording whose parenthesis is part of it —
+    # "Unique Monsters (Blood-Filled Vessel): #" — resolves as printed.
+    named = strip_named_ranges(text)
+    if named != text:
+        enumerate_masks(named)
     return out
 
 
