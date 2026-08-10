@@ -59,7 +59,31 @@ If the next character is `(`, read to the matching `)`.
 * If only a minimum is present, the maximum equals it.
 * If either side fails to parse as a number, the bounds are **non-numeric**.
 
-### 4. Enumerate candidates
+### 4. Drop named ranges
+
+A modifier can roll over a **list** rather than over an interval, and the game prints that
+range the same way it prints a numeric one:
+
+```
+Maximum number of Sentinels of Purity (Animated Weapons-Holy Armaments) is Doubled
+```
+
+The roll is a minion skill gem and the parenthesis is the first and last of the list, exactly
+as `(50-100)` is the first and last of an interval. Step 2 cannot see it — there is no numeric
+token in front of it to carry the bounds — and trade indexes one wording per option, spelling
+the name out. So the range is **dropped**, not placeheld.
+
+A group qualifies when all of:
+
+* it does not follow a digit or `)` — a numeric token's own range belongs to that token,
+  numeric bounds or not;
+* its interior splits at a `-` found from index 1, with a non-empty half either side;
+* **neither** half parses as a number.
+
+`(Blood-Filled Vessel)` in `Unique Monsters (Blood-Filled Vessel): #` qualifies too, which is
+why this produces an *additional* candidate rather than replacing the line — see step 5.
+
+### 5. Enumerate candidates
 
 Bit `i` of a mask set means token `i` stays `#`; a cleared bit is replaced with the token's
 literal source text, bounds discarded. A kept token whose bounds are non-numeric emits
@@ -85,6 +109,20 @@ has it. The literal forms exist for wordings that do not generalise — the sing
 
 Three tokens deliberately has no empty mask: a wording with three numbers and none of them
 placeheld is not a form the data ever contains, and trying it only costs a lookup.
+
+When step 4 changed the line, the whole enumeration runs a **second time** on the stripped
+form and its candidates are appended after the first set. Stripping only ever adds candidates,
+so a wording whose parenthesis is genuinely part of it resolves as printed and never reaches
+them:
+
+```text
+Maximum number of Sentinels of Purity (Animated Weapons-Holy Armaments) is Doubled
+  → "Maximum number of Sentinels of Purity (Animated Weapons-Holy Armaments) is Doubled"
+    "Maximum number of Sentinels of Purity is Doubled"
+```
+
+`placeholder_form` is **not** affected: it is the builder's join key between two sources that
+are already in `#` form, and neither of them prints a range at all.
 
 ## Worked examples
 

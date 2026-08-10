@@ -1,4 +1,5 @@
-from ppcdata.normalize import candidates, placeholder_form, scan_numbers
+from ppcdata.normalize import (candidates, placeholder_form, scan_numbers,
+                               strip_named_ranges)
 
 
 def test_sign_is_part_of_the_token():
@@ -56,3 +57,31 @@ def test_candidates_are_deduplicated_but_ordered():
     cs = candidates("+42 to maximum Life")
     assert cs == ["# to maximum Life", "+42 to maximum Life"]
     assert len(cs) == len(set(cs))
+
+
+def test_a_range_whose_roll_is_a_name_is_dropped():
+    # The pool is the minion skill gems and the roll is the one named in the wording, so
+    # there is no numeric token for the parenthesis to belong to. Trade indexes one wording
+    # per gem, spelling it out.
+    assert strip_named_ranges(
+        "Maximum number of Sentinels of Purity (Animated Weapons-Holy Armaments) is Doubled"
+    ) == "Maximum number of Sentinels of Purity is Doubled"
+
+    # A numeric token's own range belongs to that token, whether or not it reads as numbers.
+    assert strip_named_ranges("+25(20-30)% to Cold Resistance") == "+25(20-30)% to Cold Resistance"
+    assert strip_named_ranges("64(65-60)% reduced Effect") == "64(65-60)% reduced Effect"
+
+    # Neither is a parenthesis that is not a range at all.
+    assert strip_named_ranges("Adds # to # Chaos Damage (Local)") == "Adds # to # Chaos Damage (Local)"
+
+
+def test_stripping_a_named_range_only_adds_candidates_and_adds_them_last():
+    # "(Blood-Filled Vessel)" is a real wording, not a range, and it has to resolve as
+    # printed. It qualifies on shape alone, which is why the stripped form is enumerated
+    # second rather than instead.
+    assert candidates("Unique Monsters (Blood-Filled Vessel): 7") == [
+        "Unique Monsters (Blood-Filled Vessel): #",
+        "Unique Monsters (Blood-Filled Vessel): 7",
+        "Unique Monsters: #",
+        "Unique Monsters: 7",
+    ]
