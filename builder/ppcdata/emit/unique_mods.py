@@ -28,12 +28,17 @@ from __future__ import annotations
 
 import re
 
-from ..statdesc import Description, primary_variant
+from ..statdesc import Description, Variant, pinned_value, primary_variant, spec_accepts
 from .stats import join_key
 
 # A description block can cover several stats at once ("Adds # to # Fire Damage" is two), and
 # a mod's stat list has to be walked longest-run-first to find them. No block covers more.
 MAX_SPAN = 4
+
+# How many wordings one modifier may expand into. Forbidden Shako's is the widest that exists
+# — four equipment slots times 164 support gems — and the cap is here so that a table growing
+# a digit becomes a visible count rather than a bundle nobody notices doubling.
+MAX_OPTIONS = 1024
 
 _NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
@@ -102,11 +107,28 @@ def _scaled(value: int, dp: int) -> float | int:
     return int(scaled) if scaled == int(scaled) else scaled
 
 
+def _substitute(text: str, placeholders: list[int], stat_index: int, name: str) -> str | None:
+    """Replace the '#' that stands for `stat_index` with `name`.
+
+    Which '#' that is comes from the description's own ``{N}`` numbering, not from counting:
+    "Skills Socketed in your Helmet are Supported by level {2} {1}" prints its two stats in
+    the opposite order to the order it lists them.
+    """
+    if stat_index not in placeholders:
+        return None
+    nth = placeholders.index(stat_index)
+    parts = text.split("#")
+    if nth >= len(parts) - 1:
+        return None
+    return "#".join(parts[:nth + 1]) + name + "#".join(parts[nth + 1:])
+
+
 class _Resolver:
     """client mod id -> the trade filters that mod would be searched by."""
 
     def __init__(self, mods: list[dict], stats: list[dict], descs: list[Description],
-                 stat_records: list[dict]):
+                 stat_records: list[dict], indexables: dict[str, list[str]] | None = None):
+        self.indexables = indexables or {}
         self.mod_by_id = {m["Id"]: m for m in mods if m.get("Id")}
         self.stat_id_by_row = {s["_index"]: s["Id"] for s in stats}
 
@@ -127,7 +149,10 @@ class _Resolver:
 
         self.counts = {"stats_without_description": 0, "wordings_without_stat_record": 0,
                        "wordings_without_trade_id": 0, "ambiguous_wordings": 0,
-                       "mods_with_no_searchable_stat": 0, "mods_not_in_client": []}
+                       "mods_with_no_searchable_stat": 0,
+                       "mods_rolling_a_named_option": 0, "named_options": 0,
+                       "named_options_without_trade_id": 0,
+                       "mods_over_the_option_cap": [], "mods_not_in_client": []}
 
     def _mod_stats(self, mod: dict) -> list[tuple[str, int, int]]:
         """``[(client stat id, min, max)]`` in the order the mod lists them.
@@ -175,8 +200,14 @@ class _Resolver:
             group = usable[0]
         return list(group)
 
-    def _resolve(self, d: Description, implicit: bool) -> tuple[str, str, int]:
+    def _resolve(self, d: Description, implicit: bool,
+                 text: str | None = None) -> tuple[str, str, int]:
         """``(wording, trade id, dp)`` for a description. The id can be empty.
+
+        ``text`` pins the lookup to one wording the description can render, which is how a
+        modifier rolling a name reaches the id trade files that name under: trade indexes one
+        entry per option, so the join is by the wording as always — never by assuming trade
+        numbers its options the way the client numbers its rows.
 
         An empty id means the mod is real and displayable but not searchable, and the filter is
         still emitted: a pool list shorter than the pool it describes would contradict its own
@@ -187,12 +218,12 @@ class _Resolver:
         agree on the id that matters and are not ambiguity. Two *different* ids behind one
         wording are, and guessing there would produce a confident filter on the wrong stat.
         """
-        found = self._records_for(d)
+        found = self.records.get(join_key(text)) if text is not None else self._records_for(d)
         if not found:
             # Trade indexes nothing under this wording. The client's own is the best text there
             # is, which is what the app needs to render the mod.
             self.counts["wordings_without_stat_record"] += 1
-            return primary_variant(d).text, "", 0
+            return (text if text is not None else primary_variant(d).text), "", 0
         rec = found[0]
         candidates = {i for r in found for i in self._ids_for(r, implicit)}
         if len(candidates) > 1:
@@ -203,15 +234,12 @@ class _Resolver:
             return rec["ref"], "", rec.get("dp", 0)
         return rec["ref"], candidates.pop(), rec.get("dp", 0)
 
-    def filters(self, mod_id: str, implicit: bool) -> list[dict] | None:
-        """The trade filters for one mod id, or None when the client has no such mod."""
-        mod = self.mod_by_id.get(mod_id)
-        if mod is None:
-            self.counts["mods_not_in_client"].append(mod_id)
-            return None
+    def _spans(self, stats: list[tuple[str, int, int]], count: bool = True):
+        """Walk a mod's stats, yielding ``(description, stats it covers)``, longest run first.
 
-        stats = self._mod_stats(mod)
-        out: list[dict] = []
+        ``count`` is off for the option pass, which walks the same mod a second time: a stat
+        with no wording is one fact about the data, not two.
+        """
         i = 0
         while i < len(stats):
             d = None
@@ -224,31 +252,147 @@ class _Resolver:
             if d is None:
                 # Hidden stats have no wording at all — cosmetic footprints, monster-only
                 # behaviour. Nothing to search, so they are simply not filters.
-                self.counts["stats_without_description"] += 1
+                if count:
+                    self.counts["stats_without_description"] += 1
                 i += 1
                 continue
+            yield d, stats[i:i + span]
+            i += span
 
+    def _named_options(self, d: Description,
+                       span: list[tuple[str, int, int]]) -> list[tuple[str, list[int]]] | None:
+        """``[(wording, stat indices still placeheld)]`` when this span's roll is a name.
+
+        Two shapes, and a modifier can be both at once. A description may render **one
+        variant per value** — sixteen wordings, one per minion type, each pinned by its own
+        range spec — and it may declare an **indexable** stat, whose value is a row in a
+        client table of names. Forbidden Shako is both: four equipment slots as variants,
+        times 164 support gems as an index.
+
+        None when neither applies, which is every ordinary modifier.
+        """
+        pins = [pinned_value(v.ranges[0]) if v.ranges else None for v in d.variants]
+        lo0, hi0 = span[0][1], span[0][2]
+        if len(d.variants) > 1 and all(p is not None for p in pins) and hi0 > lo0:
+            chosen: list[Variant] = [v for v, p in zip(d.variants, pins) if lo0 <= p <= hi0]
+            consumed = {0}  # the wording states which value it is, so it is not a range
+        else:
+            # One wording, picked the way the "+" and "-" halves of a description are told
+            # apart: by which range spec covers the rolls this mod actually has.
+            match = next((v for v in d.variants
+                          if all(spec_accepts(s, st[1], st[2])
+                                 for s, st in zip(v.ranges, span))), None)
+            chosen = [match or primary_variant(d)]
+            consumed = set()
+
+        idx = next((v.indexable for v in chosen if v.indexable), None)
+        out: list[tuple[str, list[int]]] = []
+        for v in chosen:
+            if idx is None:
+                out.append((v.text, [p for p in v.placeholders if p not in consumed]))
+                continue
+            kind, stat_index = idx
+            names = self.indexables.get(kind) or []
+            if stat_index >= len(span):
+                return None
+            lo, hi = span[stat_index][1], span[stat_index][2]
+            rest = [p for p in v.placeholders if p not in consumed and p != stat_index]
+            for value in range(lo, hi + 1):
+                if not 1 <= value <= len(names):
+                    return None  # the table cannot answer the whole roll; do not guess half
+                text = _substitute(v.text, v.placeholders, stat_index, names[value - 1])
+                if text is None:
+                    return None
+                out.append((text, rest))
+
+        if len(out) < 2:
+            return None
+        return out
+
+    def _filter_for(self, d: Description, implicit: bool, text: str,
+                    placeheld: list[int], span: list[tuple[str, int, int]]) -> dict:
+        """One filter dict, its range covering the stats the wording still leaves placeheld."""
+        ref, trade_id, dp = self._resolve(d, implicit, text)
+        f: dict = {"ref": ref,
+                   "range": [[_scaled(span[p][1], dp), _scaled(span[p][2], dp)]
+                             for p in placeheld if p < len(span)]}
+        if trade_id:
+            f["tradeId"] = trade_id
+        return f
+
+    def filters(self, mod_id: str, implicit: bool) -> list[dict] | None:
+        """The trade filters for one mod id, or None when the client has no such mod."""
+        mod = self.mod_by_id.get(mod_id)
+        if mod is None:
+            self.counts["mods_not_in_client"].append(mod_id)
+            return None
+
+        out: list[dict] = []
+        for d, span in self._spans(self._mod_stats(mod)):
             ref, trade_id, dp = self._resolve(d, implicit)
             f: dict = {"ref": ref,
-                       "range": [[_scaled(lo, dp), _scaled(hi, dp)] for _, lo, hi in
-                                 stats[i:i + span]]}
+                       "range": [[_scaled(lo, dp), _scaled(hi, dp)] for _, lo, hi in span]}
             if trade_id:
                 f["tradeId"] = trade_id
             out.append(f)
-            i += span
+        return out
+
+    def option_filters(self, mod_id: str, implicit: bool) -> list[list[dict]] | None:
+        """One filter list per wording this modifier can roll, or None when it rolls one.
+
+        A modifier whose value is a name is a pool of exactly one member, and nothing outside
+        the client's own data says so: the wiki records it as a modifier the unique always
+        has, which it is — what varies is *which* of them, and that is the whole of what the
+        copy in hand is worth searching for.
+        """
+        mod = self.mod_by_id.get(mod_id)
+        if mod is None:
+            return None
+
+        spans = list(self._spans(self._mod_stats(mod), count=False))
+        opts = [(d, span, self._named_options(d, span)) for d, span in spans]
+        expanding = [o for o in opts if o[2]]
+        if len(expanding) != 1:
+            # None is the ordinary case. More than one would be a product of products, which
+            # no modifier in the data is, and multiplying them out on a guess is worse than
+            # leaving the modifier as the single filter it already was.
+            return None
+        if len(expanding[0][2]) > MAX_OPTIONS:
+            self.counts["mods_over_the_option_cap"].append(mod_id)
+            return None
+
+        self.counts["mods_rolling_a_named_option"] += 1
+        out: list[list[dict]] = []
+        for text, placeheld in expanding[0][2]:
+            fs: list[dict] = []
+            for d, span in spans:
+                if (d, span) == (expanding[0][0], expanding[0][1]):
+                    fs.append(self._filter_for(d, implicit, text, placeheld, span))
+                else:
+                    ref, trade_id, dp = self._resolve(d, implicit)
+                    f: dict = {"ref": ref,
+                               "range": [[_scaled(lo, dp), _scaled(hi, dp)] for _, lo, hi in span]}
+                    if trade_id:
+                        f["tradeId"] = trade_id
+                    fs.append(f)
+            self.counts["named_options"] += 1
+            if not any(f.get("tradeId") for f in fs):
+                self.counts["named_options_without_trade_id"] += 1
+            out.append(fs)
         return out
 
 
 def build(wiki_rows: list[dict], mods: list[dict], stats: list[dict],
           descs: list[Description], stat_records: list[dict],
-          known_uniques: set[str] | None = None) -> tuple[list[dict], dict]:
+          known_uniques: set[str] | None = None,
+          indexables: dict[str, list[str]] | None = None) -> tuple[list[dict], dict]:
     """Return ``(records, stats)``; records are the ndjson lines, keyed ``UNIQUE::<name>``.
 
     ``known_uniques`` is the set of unique names the trade API knows. A wiki page outside it
     is dropped: legacy and removed uniques are not searchable, and a name that should be there
     but is not is a join bug worth seeing in the counts.
     """
-    resolver = _Resolver(mods, stats, descs, stat_records)
+    resolver = _Resolver(mods, stats, descs, stat_records, indexables)
 
     # name -> {base, rows}
     by_name: dict[str, dict] = {}
@@ -272,6 +416,7 @@ def build(wiki_rows: list[dict], mods: list[dict], stats: list[dict],
 
         fixed: list[dict] = []
         pools: dict[tuple[bool, str], dict] = {}
+        option_pools: list[dict] = []
         unlisted: list[str] = []
 
         for r in item["rows"]:
@@ -287,6 +432,25 @@ def build(wiki_rows: list[dict], mods: list[dict], stats: list[dict],
                 continue
 
             implicit = _truthy(r.get("impl"))
+
+            # A modifier whose value is a name is a pool of one, whatever the wiki calls it:
+            # every copy has the modifier and no two copies need have the same wording, so it
+            # is the one thing about the item worth searching for. It cannot go through the
+            # `fixed`/`rnd` split below, because a single filter would claim this copy rolled
+            # whichever option the description happens to render first.
+            options = resolver.option_filters(mod_id, implicit)
+            if options:
+                p: dict = {"mods": [{"mod": mod_id, "filters": fs} for fs in options],
+                           "count": [1, 1]}
+                if hint:
+                    p["hint"] = hint
+                if implicit:
+                    p["implicit"] = True
+                    for e in p["mods"]:
+                        e["implicit"] = True
+                option_pools.append(p)
+                continue
+
             filters = resolver.filters(mod_id, implicit)
             if filters is None:
                 continue  # a stale wiki id; the client has no such mod
@@ -307,7 +471,7 @@ def build(wiki_rows: list[dict], mods: list[dict], stats: list[dict],
             else:
                 fixed.append(entry)
 
-        if not fixed and not pools and not unlisted:
+        if not fixed and not pools and not option_pools and not unlisted:
             continue
 
         rec: dict = {"name": name}
@@ -316,10 +480,10 @@ def build(wiki_rows: list[dict], mods: list[dict], stats: list[dict],
         if fixed:
             rec["fixed"] = sorted(fixed, key=lambda e: e["mod"])
             fixed_mods += len(fixed)
-        if pools:
+        if pools or option_pools:
             out_pools = []
             for (implicit, hint), pool in sorted(pools.items()):
-                p: dict = {"mods": sorted(pool["mods"], key=lambda e: e["mod"])}
+                p = {"mods": sorted(pool["mods"], key=lambda e: e["mod"])}
                 count = parse_count(hint)
                 if count:
                     p["count"] = count
@@ -328,7 +492,8 @@ def build(wiki_rows: list[dict], mods: list[dict], stats: list[dict],
                 if implicit:
                     p["implicit"] = True
                 out_pools.append(p)
-                pool_mods += len(p["mods"])
+            out_pools.extend(sorted(option_pools, key=lambda p: p["mods"][0]["mod"]))
+            pool_mods += sum(len(p["mods"]) for p in out_pools)
             rec["pools"] = out_pools
             pool_items += 1
         if unlisted:
@@ -337,6 +502,8 @@ def build(wiki_rows: list[dict], mods: list[dict], stats: list[dict],
 
     counts = resolver.counts
     missing = counts.pop("mods_not_in_client")
+    over_cap = counts.pop("mods_over_the_option_cap")
+    counts["mods_over_the_option_cap"] = sorted(set(over_cap))
     return records, {
         "uniques": len(records),
         "with_a_random_pool": pool_items,

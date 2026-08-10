@@ -157,7 +157,18 @@ wiki states in prose but does not enumerate. `range` has one `[min, max]` per st
 covers ("Adds # to # Fire Damage" has two) **in displayed units** — `Mods.dat` stores hundredths
 and milliseconds raw, and the record's `dp` is already applied. A filter with no `tradeId` is
 real and displayable but not searchable. `implicit: true` appears on an entry or a pool when the
-mod is an implicit. The consumer-side contract is
+mod is an implicit.
+
+**A modifier can roll a name rather than a number**, and those become a pool of their own with
+`count: [1, 1]`: The Dark Monarch doubles the limit of one of sixteen minion types, Replica
+Dragonfang's Flight raises one of 287 skill gems, Forbidden Shako supports one of 164 support
+gems in one of four equipment slots. The client states it two ways — a description with one
+wording per value, or a `display_indexable_skill` / `display_indexable_support` modifier naming
+the table the value is a row in — and trade indexes one id per option, so the join stays by
+wording, never by assuming trade numbers its options the way the client numbers its rows. The
+wiki calls such a mod fixed and is right: every copy has it, and what varies is which one it is.
+
+The consumer-side contract is
 [UNIQUE-MODS.md](https://github.com/JIRPOS/PathOfPriceCheck/blob/master/UNIQUE-MODS.md) in the
 app repo.
 

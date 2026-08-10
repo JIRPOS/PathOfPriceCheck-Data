@@ -153,7 +153,8 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     unique_names = {r["name"] for r in item_records if r["namespace"] == "UNIQUE"}
     unique_records, ustats = emit_unique_mods.build(
-        wiki_rows, mods, game_stats, descs, stat_records, unique_names)
+        wiki_rows, mods, game_stats, descs, stat_records, unique_names,
+        game_bundle.indexable_names(work))
     for k, v in ustats.items():
         if not k.startswith("_"):
             print(f"  {k}: {v}")
@@ -249,6 +250,11 @@ def _write_vectors(out: Path, stat_records: list[dict]) -> None:
         "+1 to Level of all Fire Skill Gems", "12% reduced Attack Speed",
         "Adds 1 to 2 Lightning Damage to Attacks", "100% increased Rarity of Items found",
         "+3.5% to Critical Strike Chance", "Regenerate 1.4 Life per second",
+        # A range whose roll is a name, and the control for it: a wording whose parenthesis
+        # is part of the wording itself and has to resolve as printed.
+        "Maximum number of Sentinels of Purity (Animated Weapons-Holy Armaments) is Doubled\n"
+        "Cannot have Minions other than Sentinels of Purity (Animated Weapons-Holy Armaments)",
+        "Unique Monsters (Blood-Filled Vessel): 5",
     ]
     # Plus real matcher strings with their numbers put back, so the vectors cover shapes
     # that only occur in live data.

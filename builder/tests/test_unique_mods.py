@@ -5,8 +5,13 @@ from ppcdata.statdesc import Description, Variant
 
 def _desc(stat_ids, text, negate=False):
     return Description(stat_ids=list(stat_ids),
-                       variants=[Variant(ranges=["#"] * len(stat_ids), text=text,
-                                         negate=negate)])
+                       variants=[_var(text, ["#"] * len(stat_ids), negate=negate)])
+
+
+def _var(text, ranges, negate=False, indexable=None):
+    """A variant with its placeholders numbered left to right, as the common case is."""
+    return Variant(ranges=list(ranges), text=text, negate=negate,
+                   placeholders=list(range(text.count("#"))), indexable=indexable)
 
 
 def _rec(ref, ids, dp=0):
@@ -52,8 +57,10 @@ def _row(name, mod, base="Ruby Ring", rnd=0, impl=0, hint=None):
     return {"name": name, "base": base, "mod": mod, "rnd": rnd, "impl": impl, "hint": hint}
 
 
-def _build(rows, known=("Test Ring",)):
-    return unique_mods.build(rows, MODS, STATS, DESCS, RECORDS, set(known))
+def _build(rows, known=("Test Ring",), descs=None, records=None, mods=None, stats=None,
+           indexables=None):
+    return unique_mods.build(rows, mods or MODS, stats or STATS, descs or DESCS,
+                             records or RECORDS, set(known), indexables)
 
 
 def test_fixed_mod_carries_its_trade_id_and_range():
@@ -193,3 +200,89 @@ def test_cargo_escapes_twice():
     assert unescape("Abberath&#039;s Hooves") == "Abberath's Hooves"
     assert unescape("&amp;lt;Two or Three random aura modifiers&amp;gt;") \
         == "<Two or Three random aura modifiers>"
+
+
+# A modifier whose value is a name, in both shapes the game has: one wording per value, and a
+# value that is a row number in a table of names.
+OPTION_STATS = STATS + [
+    {"_index": 7, "Id": "minion_type_doubled"},
+    {"_index": 8, "Id": "random_gem_level"},
+    {"_index": 9, "Id": "random_gem_index"},
+]
+OPTION_DESCS = DESCS + [
+    Description(stat_ids=["minion_type_doubled"], variants=[
+        _var("Maximum number of Zombies is Doubled", ["1"]),
+        _var("Maximum number of Skeletons is Doubled", ["2"]),
+        _var("Maximum number of Spectres is Doubled", ["3"]),
+    ]),
+    Description(stat_ids=["random_gem_level", "random_gem_index"], variants=[
+        Variant(ranges=["1|#", "#"], text="+# to Level of all # Gems",
+                placeholders=[0, 1], indexable=("skill", 1)),
+        Variant(ranges=["#|-1", "#"], text="-# to Level of all # Gems",
+                placeholders=[0, 1], indexable=("skill", 1)),
+    ]),
+]
+OPTION_RECORDS = RECORDS + [
+    _rec("Maximum number of Zombies is Doubled", {"explicit": ["explicit.stat_double|1"]}),
+    _rec("Maximum number of Skeletons is Doubled", {"explicit": ["explicit.stat_double|2"]}),
+    _rec("Maximum number of Spectres is Doubled", {"explicit": ["explicit.stat_double|3"]}),
+    _rec("# to Level of all Fireball Gems", {"explicit": ["explicit.indexable_skill_1"]}),
+    _rec("# to Level of all Ice Nova Gems", {"explicit": ["explicit.indexable_skill_2"]}),
+]
+OPTION_MODS = MODS + [
+    {"_index": 5, "Id": "DoubleMinionUnique__1", "StatsKey1": 7, "Stat1Min": 1, "Stat1Max": 3},
+    {"_index": 6, "Id": "RandomSkillUnique__1", "StatsKey1": 8, "Stat1Min": 3, "Stat1Max": 3,
+     "StatsKey2": 9, "Stat2Min": 1, "Stat2Max": 2},
+]
+INDEXABLES = {"skill": ["Fireball", "Ice Nova"], "support": []}
+
+
+def _build_options(rows):
+    return _build(rows, descs=OPTION_DESCS, records=OPTION_RECORDS, mods=OPTION_MODS,
+                  stats=OPTION_STATS, indexables=INDEXABLES)
+
+
+def test_one_wording_per_value_becomes_a_pool_of_one():
+    # The wiki calls this modifier fixed, and it is: every copy has it. What varies is which
+    # of the three it rendered as, and a single filter would claim this copy rolled the first.
+    recs, stats = _build_options([_row("Test Ring", "DoubleMinionUnique__1")])
+    assert "fixed" not in recs[0]
+    pool = recs[0]["pools"][0]
+    assert pool["count"] == [1, 1]
+    assert [f["tradeId"] for e in pool["mods"] for f in e["filters"]] == [
+        "explicit.stat_double|1", "explicit.stat_double|2", "explicit.stat_double|3"]
+    # The value is in the wording, so there is no range left to filter on.
+    assert all(f["range"] == [] for e in pool["mods"] for f in e["filters"])
+    assert stats["mods_rolling_a_named_option"] == 1
+    assert stats["named_options"] == 3
+
+
+def test_an_indexed_value_is_looked_up_and_the_other_range_survives():
+    recs, _ = _build_options([_row("Test Ring", "RandomSkillUnique__1")])
+    pool = recs[0]["pools"][0]
+    assert [f["ref"] for e in pool["mods"] for f in e["filters"]] == [
+        "# to Level of all Fireball Gems", "# to Level of all Ice Nova Gems"]
+    assert [f["tradeId"] for e in pool["mods"] for f in e["filters"]] == [
+        "explicit.indexable_skill_1", "explicit.indexable_skill_2"]
+    # The level is still a number, and still the only one.
+    assert all(f["range"] == [[3, 3]] for e in pool["mods"] for f in e["filters"])
+
+
+def test_the_negative_wording_is_not_the_one_a_positive_roll_expands():
+    # "+# to Level" and "-# to Level" differ only by their range specs, and a mod rolling 3..3
+    # is the positive one. Picking by order instead would name every gem twice.
+    recs, _ = _build_options([_row("Test Ring", "RandomSkillUnique__1")])
+    refs = [f["ref"] for e in recs[0]["pools"][0]["mods"] for f in e["filters"]]
+    assert len(refs) == 2 and not any(r.startswith("-") for r in refs)
+
+
+def test_a_table_too_short_for_the_roll_expands_nothing():
+    # Half a pool is worse than none: the modifier stays the single filter it was.
+    mods = [m for m in OPTION_MODS if m["Id"] != "RandomSkillUnique__1"] + [
+        {"_index": 6, "Id": "RandomSkillUnique__1", "StatsKey1": 8, "Stat1Min": 3, "Stat1Max": 3,
+         "StatsKey2": 9, "Stat2Min": 1, "Stat2Max": 99}]
+    recs, stats = _build([_row("Test Ring", "RandomSkillUnique__1")], descs=OPTION_DESCS,
+                         records=OPTION_RECORDS, mods=mods, stats=OPTION_STATS,
+                         indexables=INDEXABLES)
+    assert "pools" not in recs[0]
+    assert stats["mods_rolling_a_named_option"] == 0
