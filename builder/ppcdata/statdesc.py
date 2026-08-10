@@ -23,9 +23,20 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-# "{0}", "{1}", "{0:+d}", "{:+d}", "{0:d}" — every format placeholder becomes '#'.
-_PLACEHOLDER = re.compile(r"\{\d*(?::[^}]*)?\}")
+# "{0}", "{1}", "{0:+d}", "{:+d}", "{0:d}" — every format placeholder becomes '#'. The digits
+# are the 0-based index of the stat that fills it, and the text is free to use them out of
+# order ("... by level {2} {1}"), so they are kept rather than discarded.
+_PLACEHOLDER = re.compile(r"\{(\d*)(?::[^}]*)?\}")
 _QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+# A trailing "display_indexable_skill 2" says the stat in that slot is a **row number** in a
+# client table, not a number to print: the game renders the name it finds there. The argument
+# is the stat's 1-based position in the block's own list. Two tables, three spellings.
+INDEXABLE_TABLES = {
+    "display_indexable_skill": "skill",
+    "display_indexable_support": "support",
+    "display_indexable_non_active_support": "support",
+}
 
 
 @dataclass
@@ -35,6 +46,10 @@ class Variant:
     negate: bool = False
     fixed_value: float | None = None  # wording implies a roll but shows no number
     modifiers: list[str] = field(default_factory=list)
+    #: The 0-based stat index behind each '#', in the order the text prints them.
+    placeholders: list[int] = field(default_factory=list)
+    #: ``(table, 0-based stat index)`` when one of this wording's values is a name.
+    indexable: tuple[str, int] | None = None
 
 
 @dataclass
@@ -89,21 +104,75 @@ def _parse_variant(line: str, n_stats: int) -> Variant | None:
         return None
     head = line[: m.start()].split()
     ranges = head[:n_stats] if len(head) >= n_stats else head
-    raw_text = m.group(1).replace('\\"', '"')
-    text = _PLACEHOLDER.sub("#", raw_text).strip()
+    # `\n` is a real line break, and a modifier that spans lines is one wording: the trade text
+    # carries the break itself, so leaving the escape undecoded means no multi-line wording ever
+    # joins to its trade record. That is 568 variants, and it costs them their negate and
+    # fixed-value forms in stats.ndjson and their trade id in unique-mods.ndjson.
+    raw_text = m.group(1).replace('\\"', '"').replace("\\n", "\n")
+
+    placeholders: list[int] = []
+
+    def _placehold(pm: re.Match) -> str:
+        # "{}" carries no index and means "the next stat", which is what its position is.
+        placeholders.append(int(pm.group(1)) if pm.group(1) else len(placeholders))
+        return "#"
+
+    text = _PLACEHOLDER.sub(_placehold, raw_text).strip()
 
     tail = line[m.end() :].split()
     negate = False
+    indexable = None
     for i, tok in enumerate(tail):
         if tok == "negate" and i + 1 < len(tail) and tail[i + 1] not in ("0",):
             negate = True
+        if tok in INDEXABLE_TABLES and i + 1 < len(tail) and tail[i + 1].isdigit():
+            indexable = (INDEXABLE_TABLES[tok], int(tail[i + 1]) - 1)
 
     # A wording with no '#' still stands for a roll; it comes from the primary stat's range.
     fixed = None
     if "#" not in text and ranges:
         fixed = _implied_value(ranges[0])
 
-    return Variant(ranges=ranges, text=text, negate=negate, fixed_value=fixed, modifiers=tail)
+    return Variant(ranges=ranges, text=text, negate=negate, fixed_value=fixed, modifiers=tail,
+                   placeholders=placeholders, indexable=indexable)
+
+
+def pinned_value(spec: str) -> int | None:
+    """The one stat value a range spec pins its variant to, or None.
+
+    A description that renders a different wording per value of an index stat states that
+    value as the whole range — ``1``, ``2``, ``3``. Anything carrying ``#`` or ``|`` spans
+    values instead and pins none.
+    """
+    spec = spec.strip()
+    if not spec or "#" in spec or "|" in spec:
+        return None
+    try:
+        return int(spec)
+    except ValueError:
+        return None
+
+
+def spec_accepts(spec: str, lo: int, hi: int) -> bool:
+    """Whether a variant's range spec covers a mod's whole ``lo..hi`` for that stat.
+
+    This is how the ``+`` and ``-`` wordings of one description are told apart: they differ
+    only by ``1|#`` against ``#|-1``.
+    """
+    spec = spec.strip()
+    if not spec or spec == "#":
+        return True
+    try:
+        if "|" not in spec:
+            return lo == hi == int(spec)
+        a, b = spec.split("|", 1)
+        if a not in ("#", "") and lo < int(a):
+            return False
+        if b not in ("#", "") and hi > int(b):
+            return False
+    except ValueError:
+        return False
+    return True
 
 
 def parse(path: str) -> list[Description]:
