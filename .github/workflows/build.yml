@@ -39,8 +39,17 @@ jobs:
       - name: Resolve game patch
         id: patch
         run: |
+          set -euo pipefail
           patch=$(curl -sS --fail --max-time 30 \
             https://raw.githubusercontent.com/poe-tool-dev/latest-patch-version/main/latest.txt)
+          # A dotted version and nothing else. This string is not ours — it comes out of another
+          # project's repository — and from here it reaches both a step output and a command
+          # line, so anything with a newline or a shell metacharacter in it stops the run.
+          # `[[ =~ ]]` and not `grep`, which anchors per line and would pass a second one.
+          if [[ ! "$patch" =~ ^[0-9]+(\.[0-9]+){0,4}$ ]]; then
+            echo "::error::refusing an unexpected patch string: $(printf '%q' "$patch")"
+            exit 1
+          fi
           echo "patch=$patch" >> "$GITHUB_OUTPUT"
           echo "Game patch: $patch"
 
@@ -87,13 +96,20 @@ jobs:
 
       - name: Build
         working-directory: builder
+        env:
+          PATCH: ${{ steps.patch.outputs.patch }} # via env, never interpolated into the script
+          RUN: ${{ github.run_number }}
         run: |
+          set -euo pipefail
+          # Stamped once: two `date` calls straddling UTC midnight would tag the bundle with a
+          # day the manifest inside it does not agree with.
+          ver="$(date -u +%Y%m%d).${RUN}"
           python -m ppcdata build \
             --out ../out --workdir .work \
-            --patch '${{ steps.patch.outputs.patch }}' \
+            --patch "$PATCH" \
             --allow-stale-wiki \
-            --data-version "$(date -u +%Y%m%d).${{ github.run_number }}" \
-            --tag "data-$(date -u +%Y%m%d).${{ github.run_number }}"
+            --data-version "$ver" \
+            --tag "data-$ver"
 
       - name: Verify
         working-directory: builder
