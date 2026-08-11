@@ -76,8 +76,10 @@ jobs:
           base=https://github.com/${{ github.repository }}/releases/latest/download
           if curl -sSL --fail --max-time 60 "$base/manifest.json" -o prev/manifest.json; then
             echo "found=true" >> "$GITHUB_OUTPUT"
-            # Only the files the notes diff reads; no need for the indices.
-            for f in en-items.ndjson en-stats.ndjson item-classes.ndjson en-unique-mods.ndjson; do
+            # Only the files the notes diff reads; no need for the indices. A release that
+            # predates one of them simply 404s and the diff says it has nothing to compare.
+            for f in en-items.ndjson en-stats.ndjson item-classes.ndjson \
+                     en-unique-mods.ndjson en-mod-pools.ndjson; do
               curl -sSL --fail --max-time 300 "$base/$f" -o "prev/$f" || true
             done
           else

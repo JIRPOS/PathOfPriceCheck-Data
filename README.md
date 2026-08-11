@@ -14,7 +14,7 @@ build, not a new binary.
 | asset | what it is |
 |---|---|
 | `manifest.json` | schema/data version, game patch, per-file sha256 and size, absolute URLs |
-| `en-items.ndjson` | base types, uniques, gems, divination cards, captured beasts — including each base's `Metadata/Items/…` id, whether it has ever traded on the in-game currency exchange, and each unique's artwork path |
+| `en-items.ndjson` | base types, uniques, gems, divination cards, captured beasts — including each base's `Metadata/Items/…` id and mod domain, whether it has ever traded on the in-game currency exchange, and each unique's artwork path |
 | `en-items-name.index.bin` | fnv1a32 index, key `"{namespace}::{name}"` |
 | `en-items-ref.index.bin` | fnv1a32 index, key `"{namespace}::{refName}"` |
 | `en-items-base.index.bin` | fnv1a32 index over uniques only, key `"UNIQUE::{unique.base}"` — which uniques drop on a base, which is all an unidentified one states |
@@ -23,7 +23,9 @@ build, not a new binary.
 | `en-stats.ndjson` | clipboard wordings → trade stat hashes, with negate/fixed-value matchers |
 | `en-stats-matcher.index.bin` | fnv1a32 index over every matcher string |
 | `en-stats-ref.index.bin` | fnv1a32 index over the canonical wording |
-| `item-classes.ndjson` | the clipboard's `Item Class:` line → trade category slug |
+| `en-mod-pools.ndjson` | per mod domain: every modifier it can spawn, one entry per wording-set, with the affix name and the span of its tiers |
+| `en-mod-pools-ref.index.bin` | fnv1a32 index, key `"{domain}::{wording}"` |
+| `item-classes.ndjson` | the clipboard's `Item Class:` line → trade category slug, and the mod domain its bases agree on |
 | `stat-normalization-vectors.ndjson` | conformance suite for the client's normalizer |
 | `fnv1a-vectors.json` | hash agreement vectors |
 
@@ -114,6 +116,43 @@ of trade's 1526 uniques** have a row; the rest — sanctum relics, the Harbinger
 renamed out of the client's word list — get nothing, because guessing a path from the name would
 be a 404 per item. Two uniques sharing one picture is not a bug, and the game data says so
 outright: Hrimburn and Hrimsorrow both point at `Hrimsorrow.dds`.
+
+### A pool nobody is holding: `en-mod-pools.ndjson`
+
+Every other asset here starts from an item: a wording the clipboard printed, a base the trade
+site lists. This one starts from a **mod domain** — the whole set of modifiers a kind of item can
+roll, whether or not anybody has one. `Mods.Domain` is the pool namespace a modifier is generated
+from and `Mods.GenerationType` is how it arrives (prefix, suffix, corrupted implicit, …); both
+are needed, and four of the live domains have no name in dat-schema, so the numbers are the
+identity.
+
+Two domains are emitted, and nothing else until something asks for it. **Domain 5** is `AREA` —
+one pool for everything that opens in the map device, ordinary maps through nightmare and
+Originator maps, unique maps, invitations and expedition logbooks alike. **Domain 39** is charts.
+Within them the generation types are the ones a player *rolls*: prefixes and suffixes, the Vaal
+corruption implicits, the legacy Tempest set, and what a logbook, a memory altar and a chart's
+voyage grant. Generation 3 is the fixed implicit a base simply has — 545 wordings in domain 5
+that nobody rolls and nobody would rate — and it is left out, except for the one domain-39 row
+that *is* the rateable thing an unsailed chart prints.
+
+One record is one **wording-set**, not one mod row: the tiers of an affix all render the same
+wordings, so 897 rows collapse to 270 entries, and `min`/`max` span the lowest tier's floor to
+the highest tier's ceiling in displayed units. `name` is `Mods.Name`, the affix name the client
+prints with Advanced Mod Descriptions on. `mods` is provenance, for a client debug log that has
+to explain itself.
+
+**It describes; it never gates.** The pool is what spawns naturally, which is strictly less than
+what an item can print — an essence, a craft, a veiled mod or Harvest all put modifiers on an
+item whose weights would never have produced them. Two hygiene rules trim it further and both are
+conventions rather than data: entries whose every mod row is a Vaal side area's (`CorruptedSideArea`)
+or a legacy map series' (`Map2Tier`), and entries whose every wording carries GGG's own `[DNT]`
+marker. So a printed modifier this file does not contain is normal, and a client may use the pool
+to offer and to pre-fill but never to reject a line.
+
+`Mods.SpawnWeight_TagsKeys`/`SpawnWeight_Values` — the only thing in the game's data that says
+which base a modifier can spawn on — stay unfetched. Splitting the pool per base was their one
+use here, and the pool is deliberately not split: a client shows what the item in hand actually
+rolled, so a modifier that could never appear on it never comes up.
 
 ### The third source, and why there has to be one
 

@@ -20,6 +20,7 @@ from .constants.known_stats import BETTER_MINUS_ONE, TRADE_INVERTED
 from .emit import index as emit_index
 from .emit import items as emit_items
 from .emit import manifest as emit_manifest
+from .emit import mod_pools as emit_mod_pools
 from .emit import stats as emit_stats
 from .emit import unique_mods as emit_unique_mods
 from .sources import exchange, game_bundle, patch as patch_src, trade_api, wiki
@@ -165,7 +166,12 @@ def cmd_build(args: argparse.Namespace) -> int:
         print(f"  e.g. wiki pages trade does not list: "
               f"{', '.join(ustats['_not_in_trade_examples'][:5])}")
 
-    class_records = emit_items.build_classes(classes, TRADE_CATEGORY_BY_CLASS_ID)
+    print("building mod-pools.ndjson ...")
+    pool_records, pstats = emit_mod_pools.build(mods, game_stats, descs, stat_records)
+    for k, v in pstats.items():
+        print(f"  {k}: {v}")
+
+    class_records = emit_items.build_classes(classes, TRADE_CATEGORY_BY_CLASS_ID, bases)
     mapped = sum(1 for c in class_records if c["tradeCategory"])
     # Anything neither mapped nor explicitly waived is a gap someone should look at, so name
     # it rather than letting it hide in a count.
@@ -208,6 +214,17 @@ def cmd_build(args: argparse.Namespace) -> int:
                 [(f"UNIQUE::{r['name']}", off)
                  for r, (_, off) in zip(unique_records, unique_lines)], "unique-mods-name")
 
+    # The pool's index is keyed on `{domain}::{wording}`, not on the wording alone: charts and
+    # maps share wordings and are separate pools, and a lookup that answered with both would
+    # hand the caller an entry its item cannot roll. One entry contributes as many keys as it
+    # has wordings, the same way a stat record contributes one per matcher.
+    pools_path = out / f"{LANG}-mod-pools.ndjson"
+    pool_lines = _write_ndjson(pools_path, pool_records)
+    _index_file(out / f"{LANG}-mod-pools-ref.index.bin",
+                [(f"{r['domain']}::{s['ref']}", off)
+                 for r, (_, off) in zip(pool_records, pool_lines) for s in r["stats"]],
+                "mod-pools-ref")
+
     _write_ndjson(out / "item-classes.ndjson", class_records)
 
     _write_vectors(out, stat_records)
@@ -227,6 +244,10 @@ def cmd_build(args: argparse.Namespace) -> int:
     if exchange_ids:
         source["exchange_items"] = len(exchange_ids)
         source["exchange_through_hour"] = exchange.load_state(exchange_state)["last_hour"]
+    # Same reasoning, one asset along: written only when there is a pool, so that a client can
+    # tell "this bundle predates mod pools" from "this domain has none".
+    if pool_records:
+        source["mod_pools"] = len(pool_records)
     m = emit_manifest.build(out, data_version, game_patch, generated_at, source, tag=args.tag)
     emit_manifest.write(out, m)
 
@@ -302,6 +323,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
                                   f"{LANG}-items-ref.index.bin",
                                   f"{LANG}-items-base.index.bin"]),
         (f"{LANG}-unique-mods.ndjson", [f"{LANG}-unique-mods-name.index.bin"]),
+        (f"{LANG}-mod-pools.ndjson", [f"{LANG}-mod-pools-ref.index.bin"]),
     ):
         blob = (out / ndjson_name).read_bytes()
         starts = {0}
@@ -380,6 +402,10 @@ def cmd_notes(args: argparse.Namespace) -> int:
         ("stat wordings", f"{LANG}-stats.ndjson", lambda r: r["ref"]),
         ("item classes", "item-classes.ndjson", lambda r: r["itemClass"]),
         ("uniques with modifier data", f"{LANG}-unique-mods.ndjson", lambda r: r["name"]),
+        # Keyed on the wordings rather than on the affix name: the name is decoration and a
+        # league that reworded a map mod is exactly what this diff is read for.
+        ("pool modifiers", f"{LANG}-mod-pools.ndjson",
+         lambda r: f"{r['domain']}/{r['gen']} " + " | ".join(s["ref"] for s in r["stats"])),
     ):
         before, after = _keys(old / fname, key), _keys(new / fname, key)
         if not before:
