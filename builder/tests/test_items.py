@@ -17,6 +17,12 @@ def _build(bases):
     return {r["name"]: r.get("metadataId") for r in records}, stats
 
 
+def _records(bases):
+    names = sorted({b["Name"] for b in bases})
+    records, _ = emit_items.build(_trade(*names), bases, [], [], [])
+    return {r["name"]: r for r in records}
+
+
 # GGG keeps the superseded row when a base is replaced, so both of these names have two rows.
 # Only the live one's id is ever named by the currency-exchange feed, and the table's own
 # order puts the dead one first.
@@ -45,6 +51,69 @@ def test_the_live_row_wins_whichever_order_the_table_holds_it_in():
     assert ids["Sacrifice at Dawn"] == "Metadata/Items/MapFragments/CurrencyVaalFragment1_2"
     assert ids["Echo of Trauma"] == \
         "Metadata/Items/MapFragments/AtlasMemory/CurrencyFearKey"
+
+
+# An invitation has a row in the map device's domain and another among the quest items, and
+# the clipboard prints the first: "Item Class: Misc Map Items". The stackable rule would take
+# the quest row, which is what this pair exists to stop.
+INVITATION = [
+    _base(5100, "Writhing Invitation", "Metadata/Items/MapFragments/Primordial/QuestTangleKey",
+          43),
+    _base(5101, "Writhing Invitation",
+          "Metadata/Items/MapFragments/Primordial/CurrencyTangleKey", 5),
+]
+
+
+def test_an_invitation_is_emitted_as_the_map_device_row_not_the_quest_one():
+    for rows in (INVITATION, list(reversed(INVITATION))):
+        rec = _records(rows)["Writhing Invitation"]
+        assert rec["metadataId"] == \
+            "Metadata/Items/MapFragments/Primordial/CurrencyTangleKey"
+        # The whole reason the pick matters: the domain says which pool of modifiers the item
+        # rolls from, and the quest row would claim it rolls from none a map can.
+        assert rec["domain"] == 5
+
+
+def test_a_base_carries_the_mod_domain_it_generates_from():
+    recs = _records([_base(1, "Two-Stone Ring", "Metadata/Items/Rings/Ring12", 1)])
+    assert recs["Two-Stone Ring"]["domain"] == 1
+
+
+def test_a_trade_proxy_states_no_domain_because_it_is_not_an_item():
+    # Trade lists all 491 maps under one "Map", whose game row is a stand-in sitting with the
+    # stackable currency in domain 43. Copying that would tell a client every map in the game
+    # rolls from the currency pool; the item class answers this record instead.
+    recs = _records([_base(1, "Map", "Metadata/Items/TradeProxy/MapKey", 43)])
+    assert "domain" not in recs["Map"]
+    # Everything else the row says is still the best there is, and is left alone.
+    assert recs["Map"]["metadataId"] == "Metadata/Items/TradeProxy/MapKey"
+
+
+# One class whose bases agree on a domain, one that does not, and the proxy row that is not
+# allowed a vote in either.
+CLASSES = [{"_index": 0, "Name": "Maps", "Id": "Map"},
+           {"_index": 1, "Name": "Jewels", "Id": "Jewel"}]
+CLASS_BASES = [
+    {"Id": "Metadata/Items/Maps/MapWorldsBeach", "ModDomain": 5, "ItemClassesKey": 0},
+    {"Id": "Metadata/Items/Maps/MapWorldsStrand", "ModDomain": 5, "ItemClassesKey": 0},
+    {"Id": "Metadata/Items/TradeProxy/MapKey", "ModDomain": 43, "ItemClassesKey": 0},
+    {"Id": "Metadata/Items/Jewels/Basic", "ModDomain": 10, "ItemClassesKey": 1},
+    {"Id": "Metadata/Items/Jewels/Affliction", "ModDomain": 21, "ItemClassesKey": 1},
+]
+
+
+def test_an_item_class_answers_for_a_domain_only_where_its_bases_agree():
+    by_class = {c["itemClass"]: c
+                for c in emit_items.build_classes(CLASSES, {}, CLASS_BASES)}
+    # The proxy's 43 is not a vote, so the maps still agree.
+    assert by_class["Maps"]["domain"] == 5
+    # A class holding genuinely different things can answer for a base and never for itself.
+    assert "domain" not in by_class["Jewels"]
+
+
+def test_an_item_class_says_nothing_about_a_domain_with_no_bases_to_ask():
+    by_class = {c["itemClass"]: c for c in emit_items.build_classes(CLASSES, {})}
+    assert "domain" not in by_class["Maps"]
 
 
 def test_rows_that_tie_keep_the_table_order():

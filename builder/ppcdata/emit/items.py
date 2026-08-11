@@ -29,8 +29,17 @@ def _namespace(entry: dict) -> str:
 # usable as a liveness signal rather than a guess.
 _STACKABLE_DOMAIN = 43
 
+# `AREA` — the pool everything that opens in the map device rolls from.
+_MAP_DEVICE_DOMAIN = 5
 
-def _liveness(row: dict) -> tuple[bool, bool]:
+# GGG's stand-in rows, so the trade site can list a category it has no single base for: one
+# "Map" for all 491 of them, one "Blueprint", one contract per job. They are not items anybody
+# holds, and their `ModDomain` describes nothing — all 21 sit in 43 with the stackable
+# currency, which for a map is the pool of a different game entirely.
+_TRADE_PROXY = "Metadata/Items/TradeProxy/"
+
+
+def _liveness(row: dict) -> tuple[bool, bool, bool]:
     """How likely a BaseItemTypes row is the base that actually drops today, highest first.
 
     GGG keeps the superseded row when a base is replaced, so several rows share one display
@@ -39,13 +48,25 @@ def _liveness(row: dict) -> tuple[bool, bool]:
     feed, so taking whichever came first emitted an id nothing trades under and left every
     fragment, breachstone and resonator with no exchange price at all.
 
-    Two signals, because neither covers everything: the mod domain (the legacy fragment rows
-    are in 14, not 43) and the ``Currency``/``Stackable`` marker GGG names the replacement
-    with — which is all that separates the resonators and the Atlas echoes, whose rows are
-    both in the stackable domain. Rows that tie keep the table's own order.
+    Three signals, because none covers everything, in the order they outrank each other:
+
+    * **The map device beats the quest item.** Thirteen names have a row in both domain 5 and
+      domain 43 — every Maven's Invitation and the four Eldritch ones — and the domain-5 row is
+      the one the clipboard prints, as ``Item Class: Misc Map Items`` rather than
+      ``Quest Items``. Without this the stackable rule below picks the quest row, and the record
+      then carries the wrong item class, the wrong metadata id and the wrong mod domain: an
+      invitation would be told it rolls from the pool of a quest item.
+    * **The stackable domain**, which is what tells the live fragment rows from the legacy ones
+      (those are in 14, not 43).
+    * **The ``Currency``/``Stackable`` marker** GGG names a replacement with, which is all that
+      separates the resonators and the Atlas echoes, whose rows are both in the stackable
+      domain.
+
+    Rows that tie keep the table's own order.
     """
     last = row.get("Id", "").rsplit("/", 1)[-1]
-    return (row.get("ModDomain") == _STACKABLE_DOMAIN,
+    return (row.get("ModDomain") == _MAP_DEVICE_DOMAIN,
+            row.get("ModDomain") == _STACKABLE_DOMAIN,
             last.startswith("Currency") or "Stackable" in last)
 
 
@@ -174,6 +195,17 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
                     if g["Id"] in exchange_ids:
                         rec["exchange"] = True
                         exchange_matched.add(g["Id"])
+                # The pool namespace this base's modifiers are generated from, and the only
+                # thing that says which pool a client should show for it without compiling in a
+                # list of names. A base has exactly one — the domains are mutually exclusive.
+                #
+                # Left off a trade proxy rather than copied from it: trade's one "Map" entry
+                # joins to `TradeProxy/MapKey`, and saying 43 there would tell a client that
+                # every map in the game rolls from the stackable-currency pool. A record with no
+                # domain is answered by its item class, which is exact for that case — see
+                # `build_classes`.
+                if g.get("ModDomain") is not None and not g["Id"].startswith(_TRADE_PROXY):
+                    rec["domain"] = g["ModDomain"]
                 cat = class_name_by_row.get(g.get("ItemClassesKey"))
                 if cat:
                     rec["craftable"] = {"category": cat}
@@ -238,20 +270,40 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
                      "by_namespace": counts}
 
 
-def build_classes(classes: list[dict], category_options: dict[str, str]) -> list[dict]:
+def build_classes(classes: list[dict], category_options: dict[str, str],
+                  bases: list[dict] | None = None) -> list[dict]:
     """item-classes.ndjson — the clipboard's "Item Class: X" line to a trade category.
 
     ``ItemClasses.Name`` is already the plural form the clipboard prints ("Rings",
     "Two Hand Axes"), so it is the join key directly.
+
+    A class also carries the **mod domain** its bases generate from, but only where every one
+    of them agrees — 75 of the 86 classes, and none of the 11 that span two, because a class
+    holding genuinely different things (Jewels covers ``BASE_JEWEL`` and ``AFFLICTION_JEWEL``)
+    can only answer for a base, never for the class. It is a fallback for exactly one shape:
+    a record whose game row is a trade proxy and therefore carries no domain of its own. Maps
+    are that shape and are the reason it exists — all 511 rows of class ``Maps`` are domain 5,
+    while the "Map" trade lists them under is a proxy in 43.
     """
+    domains: dict[int, set[int]] = {}
+    for b in bases or []:
+        if b.get("Id", "").startswith(_TRADE_PROXY) or b.get("ModDomain") is None:
+            continue
+        key = b.get("ItemClassesKey")
+        if key is not None:
+            domains.setdefault(key, set()).add(b["ModDomain"])
+
     out = []
     for c in classes:
         name = c.get("Name")
         if not name:
             continue
-        out.append({
+        rec = {
             "itemClass": name,
             "id": c.get("Id", ""),
             "tradeCategory": category_options.get(c.get("Id", ""), ""),
-        })
+        }
+        if len(found := domains.get(c["_index"], set())) == 1:
+            rec["domain"] = next(iter(found))
+        out.append(rec)
     return out
