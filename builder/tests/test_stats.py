@@ -127,3 +127,38 @@ def test_a_wording_with_no_description_keeps_the_trade_text():
     # the game writes it.
     assert _strings(records[0]) == ["# total maximum Life"]
     assert st["unmatched"] == 1
+
+
+def test_a_literal_sign_in_the_description_is_folded_into_the_placeholder():
+    # GGG writes this one's sign as literal text — `"+{0}% Monster Chaos Resistance"` — where
+    # `{0:+d} to maximum Life` hides it in the format spec. The client cannot tell those apart:
+    # a sign is part of the number token, so `+25% Monster Chaos Resistance` off the clipboard
+    # normalizes to `#% …` and a record emitted as `+#% …` is indexed under a key no item text
+    # can produce. It was the whole monster-resistance family, unreachable.
+    d = Description(
+        stat_ids=["map_monster_chaos_resistance_%"],
+        variants=[Variant(ranges=["#"], text="+#% Monster Chaos Resistance")],
+    )
+    trade = _trade(("explicit", "explicit.stat_1", "+#% Monster Chaos Resistance"))
+    records, _ = _build(trade, [d])
+
+    assert _strings(records[0]) == ["#% Monster Chaos Resistance"]
+    assert records[0]["ref"] == "#% Monster Chaos Resistance"
+
+
+def test_folding_the_sign_keeps_the_plain_wording_over_the_negate_one():
+    # Once the sign is gone these two say the same thing, because the sign the client reads is
+    # the number's own. Keeping the negate entry would flip a printed -40 back to +40 — an
+    # unfindable stat traded for a wrong one.
+    d = Description(
+        stat_ids=["evasion_rating_while_in_sand_stance"],
+        variants=[
+            Variant(ranges=["#"], text="+# to Evasion Rating while in Sand Stance"),
+            Variant(ranges=["#"], text="-# to Evasion Rating while in Sand Stance", negate=True),
+        ],
+    )
+    trade = _trade(("explicit", "explicit.stat_2", "+# to Evasion Rating while in Sand Stance"))
+    records, _ = _build(trade, [d])
+
+    assert _strings(records[0]) == ["# to Evasion Rating while in Sand Stance"]
+    assert "negate" not in records[0]["matchers"][0]

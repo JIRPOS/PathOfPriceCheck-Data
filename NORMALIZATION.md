@@ -45,9 +45,25 @@ and `30`, and every "Grants 1-30 Life" style wording normalizes wrongly.
 Then consume digits, then optionally `.` followed by digits.
 
 **The sign is part of the token.** `+42` is one token, so `+42 to maximum Life` becomes
-`# to maximum Life` with no leading `+`. This is why the builder strips a `+` that
-immediately precedes a `#` in GGG's trade text before joining: trade writes
-`+# to maximum Life`, the game writes `# to maximum Life`.
+`# to maximum Life` with no leading `+`.
+
+This is why the builder folds a sign that immediately precedes a `#` **on both sides**, and
+the second half of that was missing for a long time:
+
+* *Trade's* wordings are folded before joining — trade writes `+# to maximum Life`, the game
+  writes `# to maximum Life`, and the two have to meet.
+* *The game's own* wordings are folded before being **emitted**. GGG spells the sign two ways
+  and only one of them disappears by itself: `{0:+d} to maximum Life` hides it in the format
+  spec, while `+{0}% Monster Chaos Resistance` writes it as literal text that survives into the
+  wording. Both render identically in game, and the algorithm above cannot tell them apart — it
+  takes the sign into the number either way. So a wording emitted as `+#%` is indexed under a
+  key no clipboard line can produce, and the stat is not mispriced but simply never found. 47
+  matcher strings over 34 records shipped that way, among them every `+#% Monster …
+  Resistance`, which is the whole family a map rolls.
+
+Where folding makes a stat's `+#` and `-#` wordings identical, the **plain** one is kept and
+the `negate` twin dropped: with the sign folded they say the same thing, and negating on top of
+a number that already carries its own sign would turn a printed `-40` into `+40`.
 
 ### 3. Consume an optional advanced-mod-description range
 

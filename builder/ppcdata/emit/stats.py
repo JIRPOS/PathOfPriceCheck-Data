@@ -8,9 +8,11 @@ Two sources meet here:
   a stat trade indexes as "increased", fixed-value wordings like "No Physical Damage", and
   decimal placement.
 
-They join on the normalized wording. The one wrinkle is that trade writes ``+# to maximum
-Life`` while the game's ``{0:+d}`` placeholder swallows the sign into ``# to maximum Life``,
-so the trade side is normalized before matching.
+They join on the normalized wording. The wrinkle is the sign in front of a placeholder: trade
+writes ``+# to maximum Life`` while the game's ``{0:+d}`` swallows it into ``# to maximum
+Life``, so the trade side is folded before matching — and the game's own side is folded before
+being emitted, because GGG also writes the sign as literal text (``+{0}% Monster Chaos
+Resistance``) where the format spec would have hidden it. See ``_LITERAL_SIGN``.
 """
 
 from __future__ import annotations
@@ -24,6 +26,22 @@ from ..statdesc import Description, primary_variant
 # Trade renders an explicit sign in front of the placeholder; the game folds it into the
 # number. Normalize trade's form so the two sides meet.
 _SIGNED_PLACEHOLDER = re.compile(r"(?<![\w#])\+#")
+
+# The same sign, on the side we *emit* — and here it can be either one.
+#
+# GGG spells a rendered number's sign two ways. `{0:+d} to maximum Life` puts it inside the
+# format spec, where it vanishes with the placeholder; `+{0}% Monster Chaos Resistance` writes
+# it as literal text, where it survives into the wording. The client cannot tell those apart:
+# its normalizer takes a sign as part of the number token every time (NORMALIZATION.md, step
+# 2), so `+25% Monster Chaos Resistance` off the clipboard always becomes
+# `#% Monster Chaos Resistance`. A wording emitted as `+#%` is therefore indexed under a key
+# no item text can ever produce, and the stat is unreachable — not mispriced, simply never
+# found.
+#
+# 47 matcher strings across 34 records shipped that way, among them every `+#% Monster …
+# Resistance` and `+#% Monster Physical Damage Reduction`, which is the whole resistance family
+# a map rolls and the one map check most wants a verdict on.
+_LITERAL_SIGN = re.compile(r"(?<![\w#])[+-]#")
 
 # Modifiers on a stat-description variant that shift the decimal point.
 _DP_MODIFIERS = {
@@ -45,6 +63,15 @@ def join_key(text: str) -> str:
     return _SIGNED_PLACEHOLDER.sub("#", placeholder_form(text)).strip()
 
 
+def rendered_form(text: str) -> str:
+    """A description's wording as the client will look it up: sign folded into the number.
+
+    Applied to what is emitted rather than only to what is joined on, which is the difference
+    that made `+#% Monster Chaos Resistance` unfindable. See `_LITERAL_SIGN`.
+    """
+    return _LITERAL_SIGN.sub("#", text)
+
+
 def _dp_for(d: Description) -> int:
     dp = 0
     for v in d.variants:
@@ -54,11 +81,28 @@ def _dp_for(d: Description) -> int:
     return dp
 
 
+def _keep(m: dict, prev: dict) -> bool:
+    """Whether `m` should displace `prev` as the entry for a wording they now share.
+
+    **Never a negate wording over a plain one.** Folding the sign in collapses `+# to Evasion
+    Rating while in Sand Stance` onto the `-#` form GGG lists beside it as that stat's negate
+    variant — and once the sign is gone the two say the same thing, because the sign the client
+    reads is the number's own. Keeping the negate one would flip a printed `-40` back to `+40`,
+    turning an unfindable stat into a wrong one, which is the worse trade.
+
+    Otherwise the most informative wins: a wording repeated with and without an implied value
+    keeps the value.
+    """
+    if m.get("negate", False) != prev.get("negate", False):
+        return not m.get("negate", False)
+    return len(m) > len(prev)
+
+
 def _matchers(d: Description) -> list[dict]:
     """One entry per distinct wording the game can render for this stat."""
     seen: dict[str, dict] = {}
     for v in d.variants:
-        text = v.text
+        text = rendered_form(v.text)
         if not text:
             continue
         m: dict = {"string": text}
@@ -67,9 +111,7 @@ def _matchers(d: Description) -> list[dict]:
         if v.fixed_value is not None and "#" not in text:
             m["value"] = v.fixed_value
         prev = seen.get(text)
-        # Keep the most informative duplicate: a wording repeated with and without an
-        # implied value should keep the value.
-        if prev is None or (len(m) > len(prev)):
+        if prev is None or _keep(m, prev):
             seen[text] = m
     return list(seen.values())
 
@@ -103,7 +145,9 @@ def _ref_for(d: Description, matchers: list[dict]) -> str:
     anything — a record keyed by trade's own "Lose #% of Life on Kill" hash stores the roll the
     way that hash indexes it, positive.
     """
-    primary = primary_variant(d).text
+    # Folded the same way the matchers were, or the primary wording would never be found among
+    # them and every signed stat would fall through to `matchers[0]`.
+    primary = rendered_form(primary_variant(d).text)
     ref = primary if any(m["string"] == primary for m in matchers) else matchers[0]["string"]
     for m in matchers:
         if m["string"] == ref:
