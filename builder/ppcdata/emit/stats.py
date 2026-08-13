@@ -81,6 +81,34 @@ def _dp_for(d: Description) -> int:
     return dp
 
 
+def _widen(d: Description, siblings: list[Description],
+           by_text: dict[str, Description]) -> Description:
+    """`d` plus the wordings only a sibling file states for the same stat id(s).
+
+    A stat can be worded differently depending on where it rolled: the main file's phrasing is
+    also trade's own canonical text, but `heist_equipment_stat_descriptions.txt`,
+    `map_stat_descriptions.txt` and the rest override it for their own item class.
+    `statdesc.parse` runs once per file, so two blocks that share a stat id still come back as
+    two separate `Description` objects, and without this, `by_text` below keeps only the one
+    whose wording trade matched — every other file's phrasing for that same stat joins nothing.
+    A rare Heist Gear suffix prints "reduced Hiring Fee"; the record trade builds only ever
+    carried "reduced Hiring Fee of Rogues", the main file's wording, so the item's own line came
+    back unrecognised.
+
+    **Not every same-numbered id is the same stat, though.** GGG reuses a raw stat id across
+    genuinely unrelated wordings often enough that `critical_strike_chance_+%` is both "Global
+    Critical Strike Chance" in the main file and, in the heist file, a bare "Critical Strike
+    Chance" that happens to collide letter-for-letter with a *different* id's
+    (`local_critical_strike_chance_+%`) own wording. Folding both blindly by id would have
+    handed one wording to two records — exactly what the client cannot resolve. A sibling's
+    variant is only safe to add when nothing else already claims its text: either no
+    `Description` does, or the claimant is the sibling itself.
+    """
+    extra = [v for s in siblings if s is not d for v in s.variants
+             if by_text.get(join_key(v.text)) in (None, s)]
+    return Description(stat_ids=d.stat_ids, variants=d.variants + extra) if extra else d
+
+
 def _keep(m: dict, prev: dict) -> bool:
     """Whether `m` should displace `prev` as the entry for a wording they now share.
 
@@ -180,6 +208,10 @@ def build(trade_stats: dict, descs: list[Description], better_overrides: dict[st
         for v in d.variants:
             by_text.setdefault(join_key(v.text), d)
 
+    siblings_by_ids: dict[tuple[str, ...], list[Description]] = {}
+    for d in descs:
+        siblings_by_ids.setdefault(tuple(d.stat_ids), []).append(d)
+
     # Group trade entries by their normalized wording: the same stat appears once per
     # namespace (explicit/implicit/fractured/crafted/enchant/...), and those all belong to
     # one record whose trade.ids map is keyed by namespace.
@@ -205,6 +237,7 @@ def build(trade_stats: dict, descs: list[Description], better_overrides: dict[st
         ids = grouped[key]
         d = by_text.get(key)
         if d is not None:
+            d = _widen(d, siblings_by_ids.get(tuple(d.stat_ids), ()), by_text)
             matched += 1
             matchers = _own_matchers(d, key, grouped.keys())
             ref = _ref_for(d, matchers)

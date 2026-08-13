@@ -146,6 +146,95 @@ def test_a_literal_sign_in_the_description_is_folded_into_the_placeholder():
     assert records[0]["ref"] == "#% Monster Chaos Resistance"
 
 
+def test_a_class_specific_wording_joins_the_same_stat_id_from_another_file():
+    # heist_contract_npc_cost_+% is worded two ways depending on where it rolled: the main
+    # file's "of Rogues" phrasing, which is also trade's own canonical text, and
+    # heist_equipment_stat_descriptions.txt's bare phrasing, which is what a Heist Gear item
+    # actually prints. statdesc.parse runs once per file, so these arrive as two Description
+    # objects sharing a stat id rather than one — and before the merge, only the file whose
+    # wording trade matched ever became part of a record, so the bare phrasing joined nothing
+    # and a rare Heist Gear item's own "reduced Hiring Fee" line came back unrecognised.
+    main = Description(
+        stat_ids=["heist_contract_npc_cost_+%"],
+        variants=[
+            Variant(ranges=["1|#"], text="#% increased Hiring Fee of Rogues"),
+            Variant(ranges=["#|-1"], text="#% reduced Hiring Fee of Rogues", negate=True),
+        ],
+    )
+    heist_equipment = Description(
+        stat_ids=["heist_contract_npc_cost_+%"],
+        variants=[
+            Variant(ranges=["1|#"], text="#% increased Hiring Fee"),
+            Variant(ranges=["#|-1"], text="#% reduced Hiring Fee", negate=True),
+        ],
+    )
+    trade = _trade(("explicit", "explicit.stat_2257592286", "#% increased Hiring Fee of Rogues"))
+    records, st = _build(trade, [main, heist_equipment])
+
+    rec = _by_id(records, "explicit.stat_2257592286")
+    assert rec["ref"] == "#% increased Hiring Fee of Rogues"
+    assert "#% increased Hiring Fee" in _strings(rec)
+    assert "#% reduced Hiring Fee" in _strings(rec)
+    assert st["wordings_ambiguous_in_a_namespace"] == []
+
+
+def test_a_reused_stat_id_does_not_hand_one_wording_to_two_records():
+    # critical_strike_chance_+% is real: the main file words it "Global Critical Strike
+    # Chance" and the gem file's "Supported Skills have..." variant genuinely belongs beside
+    # it. But heist_equipment_stat_descriptions.txt also reuses that same id for a bare
+    # "Critical Strike Chance" wording that happens to collide letter-for-letter with a
+    # *different* id's own text (local_critical_strike_chance_+%, trade-matched on its own).
+    # Folding every same-id block together handed that bare wording to both records — the
+    # exact shape the client refuses to resolve.
+    main = Description(
+        stat_ids=["critical_strike_chance_+%"],
+        variants=[
+            Variant(ranges=["1|#"], text="#% increased Global Critical Strike Chance"),
+            Variant(ranges=["#|-1"], text="#% reduced Global Critical Strike Chance",
+                    negate=True),
+        ],
+    )
+    gem = Description(
+        stat_ids=["critical_strike_chance_+%"],
+        variants=[
+            Variant(ranges=["1|#"], text="Supported Skills have #% increased Critical "
+                                        "Strike Chance"),
+            Variant(ranges=["#|-1"], text="Supported Skills have #% reduced Critical Strike "
+                                        "Chance", negate=True),
+        ],
+    )
+    heist_equipment = Description(
+        stat_ids=["critical_strike_chance_+%"],
+        variants=[
+            Variant(ranges=["1|#"], text="#% increased Critical Strike Chance"),
+            Variant(ranges=["#|-1"], text="#% reduced Critical Strike Chance", negate=True),
+        ],
+    )
+    local = Description(
+        stat_ids=["local_critical_strike_chance_+%"],
+        variants=[
+            Variant(ranges=["1|#"], text="#% increased Critical Strike Chance"),
+            Variant(ranges=["#|-1"], text="#% reduced Critical Strike Chance", negate=True),
+        ],
+    )
+    trade = _trade(
+        ("explicit", "explicit.stat_587431675", "#% increased Global Critical Strike Chance"),
+        ("explicit", "explicit.stat_2375316951", "#% increased Critical Strike Chance"),
+    )
+    # Parse order matters here, the same as it does for the real files: both of the main file's
+    # blocks (global and local) come before the gem and heist-equipment files that reuse
+    # `critical_strike_chance_+%`'s id for their own wordings.
+    records, st = _build(trade, [main, local, gem, heist_equipment])
+
+    glob = _by_id(records, "explicit.stat_587431675")
+    bare = _by_id(records, "explicit.stat_2375316951")
+    assert "Supported Skills have #% increased Critical Strike Chance" in _strings(glob)
+    assert "#% increased Critical Strike Chance" not in _strings(glob)
+    assert _strings(bare) == ["#% increased Critical Strike Chance",
+                              "#% reduced Critical Strike Chance"]
+    assert st["wordings_ambiguous_in_a_namespace"] == []
+
+
 def test_folding_the_sign_keeps_the_plain_wording_over_the_negate_one():
     # Once the sign is gone these two say the same thing, because the sign the client reads is
     # the number's own. Keeping the negate entry would flip a printed -40 back to +40 — an
