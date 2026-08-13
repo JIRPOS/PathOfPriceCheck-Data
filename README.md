@@ -126,20 +126,34 @@ from and `Mods.GenerationType` is how it arrives (prefix, suffix, corrupted impl
 are needed, and four of the live domains have no name in dat-schema, so the numbers are the
 identity.
 
-Two domains are emitted, and nothing else until something asks for it. **Domain 5** is `AREA` —
+Three domains are emitted, and nothing else until something asks for it. **Domain 5** is `AREA` —
 one pool for everything that opens in the map device, ordinary maps through nightmare and
-Originator maps, unique maps, invitations and expedition logbooks alike. **Domain 39** is charts.
+Originator maps, unique maps, invitations and expedition logbooks alike. **Domain 22** is
+`HEIST_AREA`, the pool behind the nine contract and nine blueprint bases. **Domain 39** is charts.
 Within them the generation types are the ones a player *rolls*: prefixes and suffixes, the Vaal
 corruption implicits, the legacy Tempest set, and what a logbook, a memory altar and a chart's
 voyage grant. Generation 3 is the fixed implicit a base simply has — 545 wordings in domain 5
 that nobody rolls and nobody would rate — and it is left out, except for the one domain-39 row
-that *is* the rateable thing an unsailed chart prints.
+that *is* the rateable thing an unsailed chart prints. Domain 22 has prefixes and suffixes and
+nothing else.
+
+The three stay apart where they word a modifier alike, because the game generates them separately
+and their ranges disagree — `Resistant` spans 10-25 chaos on a map and 0-40 on a chart. Whether
+one decision covers both is the reader's call, and the index key below is what leaves it open.
 
 One record is one **wording-set**, not one mod row: the tiers of an affix all render the same
-wordings, so 897 rows collapse to 270 entries, and `min`/`max` span the lowest tier's floor to
+wordings, so 1196 rows collapse to 360 entries, and `min`/`max` span the lowest tier's floor to
 the highest tier's ceiling in displayed units. `name` is `Mods.Name`, the affix name the client
 prints with Advanced Mod Descriptions on. `mods` is provenance, for a client debug log that has
 to explain itself.
+
+**A set can hold wordings the item does not print.** Every Nightmare-map affix grants `#% more
+Currency found in Area`, and every domain-22 affix grants `#% more raising of Alert Level` and
+`#% increased time before Lockdown`; the client folds those into the item's properties instead of
+printing a line, and a captured contract whose six affixes carry -7/-6/-6/-5/-6/-4 shows
+`Alert Level Reduction: +34%`. They stay in the set — an entry missing a stat is a wrong answer
+about the affix, and a consumer that matches a printed line to the smallest entry covering it
+does not need them gone.
 
 **It describes; it never gates.** The pool is what spawns naturally, which is strictly less than
 what an item can print — an essence, a craft, a veiled mod or Harvest all put modifiers on an

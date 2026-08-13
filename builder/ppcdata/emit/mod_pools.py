@@ -18,6 +18,14 @@ same wordings and a verdict attaches to a wording, so the 800 domain-5 affix row
 about 160 entries. ``min``/``max`` span the lowest and highest tier, in displayed units with
 ``dp`` applied, exactly as ``unique_mods`` emits its ranges — they are what lets a pasted map
 regex be tested against a rendered line rather than against a placeholder.
+
+**A set can hold wordings the item's tooltip does not print, and they stay in.** A Nightmare
+map's affixes each grant ``#% more Currency found in Area``, and every domain-22 affix grants
+``#% more raising of Alert Level`` and ``#% increased time before Lockdown``; neither prints as
+a line, because the client folds them into the item's properties instead — a captured contract
+whose six affixes carry -7/-6/-6/-5/-6/-4 prints ``Alert Level Reduction: +34%``. Dropping them
+would be a lie about what the affix is, and the client resolves a printed line to the smallest
+entry that covers it, so it does not need them gone.
 """
 
 from __future__ import annotations
@@ -30,7 +38,12 @@ from .mod_resolver import DNT, ModResolver, scaled
 #: Which ``(domain, generation type)`` pairs are emitted, and nothing else until something
 #: asks for one. Domain 5 is ``AREA``, the pool every item that opens in the map device rolls
 #: from — ordinary, nightmare and Originator maps, unique maps, invitations and expedition
-#: logbooks alike. Domain 39 is charts, a domain dat-schema does not name.
+#: logbooks alike. Domain 22 is ``HEIST_AREA``, the pool behind the 9 contract and 9 blueprint
+#: bases. Domain 39 is charts, a domain dat-schema does not name.
+#:
+#: The three are separate pools rather than one because the game generates them separately and
+#: their ranges disagree — a wording shared between two is two entries, and it is the reader
+#: above that decides whether one decision covers both.
 #:
 #: The generation types are the ones a player *rolls*: prefixes and suffixes, the Vaal
 #: corruption implicits, the legacy Tempest/Eclipse set, and the modifiers an expedition
@@ -38,9 +51,11 @@ from .mod_resolver import DNT, ModResolver, scaled
 #: base simply has, which is why domain 5 leaves it out — 545 wordings nobody rolls and nobody
 #: rates would swamp a list meant to be read. Domain 39's one generation-3 row is the
 #: exception that proves it: an unsailed chart prints "Voyage Modifier will be revealed once
-#: Charted" *instead of* the modifier, so it is the only thing there is to rate.
+#: Charted" *instead of* the modifier, so it is the only thing there is to rate. Domain 22 has
+#: prefixes and suffixes and nothing else.
 POOL_GENERATIONS = {
     5: (1, 2, 5, 8, 23, 36),
+    22: (1, 2),
     39: (1, 2, 3, 37),
 }
 

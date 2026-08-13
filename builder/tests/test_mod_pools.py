@@ -2,6 +2,7 @@ from ppcdata.emit import mod_pools
 from ppcdata.statdesc import Description, Variant
 
 MAP = 5
+HEIST = 22
 CHART = 39
 
 
@@ -136,6 +137,38 @@ def test_a_modifier_with_no_wording_at_all_is_not_an_entry():
 
 def test_a_domain_outside_the_pool_is_not_emitted():
     assert "of the Whale" not in _by_name(_build()[0])
+
+
+def _heist_build(*mods):
+    """``_build`` with the alert-level wording every domain-22 affix also grants."""
+    return mod_pools.build(
+        MODS + list(mods),
+        STATS + [{"_index": 9, "Id": "heist_alert_level_+%"}],
+        DESCS + [_desc(["heist_alert_level_+%"], "#% more raising of Alert Level")],
+        RECORDS + [_rec("#% more raising of Alert Level",
+                        {"explicit": ["explicit.stat_alert"]})])
+
+
+def test_a_heist_affix_is_its_own_pool_where_a_map_words_it_the_same():
+    # Same wording, different pool and different ranges: 20-49 on a map, 70-80 on a contract.
+    # Whether one decision covers both is the reader's call, not this file's.
+    recs, _ = _heist_build(_mod(9, "HeistContractMonsterLife", "Fecund", HEIST, 1, [(1, 70, 80)]))
+    heist = [r for r in recs if r["domain"] == HEIST]
+    assert len(heist) == 1
+    assert heist[0]["stats"] == [{"ref": "#% more Monster Life", "trade": "explicit.stat_life",
+                                 "min": 70, "max": 80}]
+
+
+def test_a_heist_affixs_unprinted_alert_stats_stay_in_its_wording_set():
+    # The contract folds these into `Alert Level Reduction`, so the tooltip shows one line and
+    # the affix grants two. The set keeps both: a client resolves the printed line to the
+    # smallest entry covering it, and an entry missing a stat is a wrong answer about the affix.
+    recs, _ = _heist_build(_mod(9, "HeistContractMonsterLife", "Fecund", HEIST, 1,
+                                [(1, 70, 80), (9, -7, -7)]))
+    entry = [r for r in recs if r["domain"] == HEIST][0]
+    assert [s["ref"] for s in entry["stats"]] == ["#% more Monster Life",
+                                                  "#% more raising of Alert Level"]
+    assert entry["stats"][1]["min"] == -7
 
 
 def test_a_chart_affix_keeps_its_own_domain():
