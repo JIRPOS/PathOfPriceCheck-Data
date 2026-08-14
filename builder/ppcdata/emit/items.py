@@ -233,12 +233,21 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
                         rec["armour"] = ar
         records.append(rec)
 
-    # Deduplicate on (namespace, name, tradeDisc): trade lists the same base under several
-    # groups when it is queryable more than one way.
+    # Deduplicate on (namespace, name, tradeDisc, unique base): trade lists the same base under
+    # several groups when it is queryable more than one way.
+    #
+    # **A unique is its name *and* its base.** Thirteen names drop on more than one base under
+    # one discriminator — Stormblood on both the Sapphire and the Topaz Flask, Precursor's
+    # Emblem on five rings, Grand Spectrum and Combat Focus on three jewels each — and keying
+    # on the name alone threw 20 of the 1,546 unique entries away. What that costs is not the
+    # record: it is `en-items-base.index.bin`, the base -> uniques index an **unidentified**
+    # unique is read through. A base whose second unique was dropped answers with one
+    # candidate, and one candidate is not a question the client asks — it takes the name. So an
+    # unidentified Topaz Flask was confidently read as a Vessel of Vinktar and priced as one.
     seen: set[tuple] = set()
     deduped: list[dict] = []
     for r in records:
-        k = (r["namespace"], r["name"], r.get("tradeDisc"))
+        k = (r["namespace"], r["name"], r.get("tradeDisc"), r.get("unique", {}).get("base"))
         if k in seen:
             continue
         seen.add(k)

@@ -111,11 +111,27 @@ A unique is not a row in `BaseItemTypes` — it is a name, a base and a mod list
 item drops — so the only join that reaches a picture is `UniqueStashLayout`, where `Words.Text`
 is the display name the client prints and the clipboard repeats. Alternate-art rows are skipped:
 they are the foil and race-reward variants of the same unique, and one of those in place of the
-ordinary art shows the player something that does not look like the item in their stash. **1416
-of trade's 1526 uniques** have a row; the rest — sanctum relics, the Harbinger pieces, a few
+ordinary art shows the player something that does not look like the item in their stash. **1436
+of trade's 1546 unique records** have a row; the rest — sanctum relics, the Harbinger pieces, a few
 renamed out of the client's word list — get nothing, because guessing a path from the name would
 be a 404 per item. Two uniques sharing one picture is not a bug, and the game data says so
-outright: Hrimburn and Hrimsorrow both point at `Hrimsorrow.dds`.
+outright: Hrimburn and Hrimsorrow both point at `Hrimsorrow.dds`. The join is on the name, so the
+two records of a unique that drops on two bases (below) carry the same picture — which is the
+game's own answer: `UniqueStashLayout` has one row per name.
+
+### A unique is its name *and* its base
+
+`en-items.ndjson` carries **one record per (name, base, discriminator)**, and 13 names drop on
+more than one base under one discriminator: Stormblood on both the Sapphire and the Topaz Flask,
+Precursor's Emblem on five rings, Grand Spectrum and Combat Focus on three jewels each,
+Doryani's Delusion on three boots — twice, once for the bases it drops on today and once for the
+ones it used to. Deduplicating on the name alone threw 20 of the 1,546 entries away.
+
+What that costs is not the record, which trade would answer for either way. It is
+`en-items-base.index.bin`: a base whose second unique was dropped answers with **one** candidate,
+and one candidate is not a question a client asks — it is the name of the item, since nothing on
+an unidentified one prints it. Three bases were wrong in exactly that way (an unidentified Topaz
+Flask was read as a Vessel of Vinktar), and four more answered with nothing at all.
 
 ### A pool nobody is holding: `en-mod-pools.ndjson`
 

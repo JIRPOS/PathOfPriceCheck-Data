@@ -215,3 +215,25 @@ def test_only_uniques_are_given_art_and_only_where_there_is_some():
     assert "art" not in by_name["Goathide Gloves"]
     assert stats["uniques_with_art"] == 1
     assert stats["uniques_without_art"] == 1
+
+
+# One unique on two bases with nothing to tell them apart, and the same name a second time
+# under a discriminator — trade's own shape for Stormblood and for Doryani's Delusion.
+MULTI_BASE = {"result": [{"id": "flask", "entries": [
+    {"name": "Stormblood", "type": "Sapphire Flask", "flags": {"unique": True}},
+    {"name": "Stormblood", "type": "Topaz Flask", "flags": {"unique": True}},
+    {"name": "Vessel of Vinktar", "type": "Topaz Flask", "flags": {"unique": True}},
+    # Trade lists a base under several groups when it is queryable more than one way, which is
+    # what the dedup is for and must keep doing.
+    {"name": "Stormblood", "type": "Topaz Flask", "flags": {"unique": True}},
+]}]}
+
+
+def test_a_unique_on_two_bases_is_two_records():
+    records, _ = emit_items.build(MULTI_BASE, [], [], [], [])
+    bases = [r["unique"]["base"] for r in records if r["name"] == "Stormblood"]
+    # The base -> uniques index is built from these, and it is the whole of what an
+    # unidentified unique is read through: drop the second and the Topaz Flask answers with
+    # one candidate, which the client takes as the name rather than as a question.
+    assert bases == ["Sapphire Flask", "Topaz Flask"]
+    assert len(records) == 3
