@@ -218,11 +218,18 @@ def build(trade_stats: dict, descs: list[Description], better_overrides: dict[st
     grouped: dict[str, dict[str, list[str]]] = {}
     order: list[str] = []
     options: dict[str, dict] = {}
+    wordless: set[str] = set()
     for e in stat_entries(trade_stats):
         text = e.get("text", "")
         if not text:
             continue
         key = join_key(text)
+        # From 3.30 trade lists the fishing lure and hook stats as a bare "#": the client now
+        # renders their names out of a table. A matcher with no words in it answers to any line
+        # that is only a number, so it is dropped and those lines go unsearched instead.
+        if not any(c.isalpha() for c in key):
+            wordless.add(key)
+            continue
         if key not in grouped:
             grouped[key] = {}
             order.append(key)
@@ -278,6 +285,7 @@ def build(trade_stats: dict, descs: list[Description], better_overrides: dict[st
             1 for r in records if any("value" in m for m in r["matchers"])),
         # Records that gave a wording up to the sibling holding trade's own hash for it.
         "narrowed_to_own_wordings": narrowed,
+        "wordless_trade_wordings_dropped": sorted(wordless),
         # Must be 0: two records answering to one wording in one namespace is exactly what the
         # client cannot resolve, and it drops the modifier rather than guess.
         "wordings_ambiguous_in_a_namespace": _ambiguous(records),

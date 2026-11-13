@@ -15,26 +15,40 @@ from pathlib import Path
 
 DAT_VERSION = "15.2.0"
 
+DESCRIPTIONS_DIR = "Metadata/StatDescriptions/"
+
 # The raw asset carrying every stat wording. PoE 1 keeps it under Metadata/; the
-# data/StatDescriptions/*.csd path is PoE 2 and does not exist here.
-STAT_DESCRIPTIONS = "Metadata/StatDescriptions/stat_descriptions.txt"
+# data/StatDescriptions/ path is PoE 2 and does not exist here.
+STAT_DESCRIPTIONS = "stat_descriptions"
 
 # The main file does not cover everything: map, chest, heist and sanctum mods are worded in
 # their own files, and without them those wordings fall back to the trade text and lose
 # their negate and fixed-value forms. Best-effort — GGG adds and removes these between
 # leagues, so a missing one is dropped rather than failing the build.
 OPTIONAL_DESCRIPTIONS = [
-    "Metadata/StatDescriptions/map_stat_descriptions.txt",
-    "Metadata/StatDescriptions/chest_stat_descriptions.txt",
-    "Metadata/StatDescriptions/heist_equipment_stat_descriptions.txt",
-    "Metadata/StatDescriptions/sanctum_relic_stat_descriptions.txt",
-    "Metadata/StatDescriptions/necropolis_stat_descriptions.txt",
-    "Metadata/StatDescriptions/crucible_stat_descriptions.txt",
-    "Metadata/StatDescriptions/mercenary_stat_descriptions.txt",
-    "Metadata/StatDescriptions/ultimatum_stat_descriptions.txt",
-    "Metadata/StatDescriptions/delve_stat_descriptions.txt",
-    "Metadata/StatDescriptions/gem_stat_descriptions.txt",
+    "map_stat_descriptions",
+    "chest_stat_descriptions",
+    "heist_equipment_stat_descriptions",
+    "sanctum_relic_stat_descriptions",
+    "necropolis_stat_descriptions",
+    "crucible_stat_descriptions",
+    "mercenary_stat_descriptions",
+    "ultimatum_stat_descriptions",
+    "delve_stat_descriptions",
+    "gem_stat_descriptions",
 ]
+
+# 3.30 renamed every description file from .txt to .csd, PoE 2's extension, with the text
+# grammar unchanged. Earlier patches have only .txt. One extension serves the whole set: were
+# the main file found under .csd while the optional ones were still asked for as .txt, every
+# optional file would be dropped as "not in this patch" and the build would pass without them.
+DESCRIPTION_EXTENSIONS = (".csd", ".txt")
+
+
+def _description_files(ext: str) -> tuple[str, list[str]]:
+    return (DESCRIPTIONS_DIR + STAT_DESCRIPTIONS + ext,
+            [DESCRIPTIONS_DIR + name + ext for name in OPTIONAL_DESCRIPTIONS])
+
 
 _MISSING_PATH = re.compile(r"path:\s*'([^']+)'")
 
@@ -112,28 +126,41 @@ def extract(workdir: Path, patch: str) -> list[str]:
     if shutil.which("npx") is None:
         raise RuntimeError("npx not found; Node is required to extract game data")
 
-    wanted = [STAT_DESCRIPTIONS] + OPTIONAL_DESCRIPTIONS
-    for _ in range(len(OPTIONAL_DESCRIPTIONS) + 1):
-        write_config(workdir, patch, wanted)
-        rc, out = _run(workdir)
+    # The extractor adds to files/ rather than replacing it, so a workdir reused across a
+    # patch would mix both extensions' files into one build.
+    shutil.rmtree(workdir / "files", ignore_errors=True)
 
-        # The tool exits 0 even when a table is missing a column, so scan its output. A
-        # table changing shape is a real breakage and must fail loudly.
-        if "doesn't have a column named" in out:
-            bad = [ln for ln in out.splitlines() if "doesn't have a column" in ln]
-            raise RuntimeError("dat-schema mismatch (a table changed shape):\n  "
-                               + "\n  ".join(bad))
-        if rc == 0:
-            return wanted
+    for ext in DESCRIPTION_EXTENSIONS:
+        main, optional = _description_files(ext)
+        wanted = [main] + optional
+        for _ in range(len(optional) + 1):
+            write_config(workdir, patch, wanted)
+            rc, out = _run(workdir)
 
-        m = _MISSING_PATH.search(out) if "NoFileInfoError" in out else None
-        if m and m.group(1) in OPTIONAL_DESCRIPTIONS and m.group(1) in wanted:
-            print(f"  note: {m.group(1)} is not in this patch; skipping")
-            wanted.remove(m.group(1))
-            continue
-        raise RuntimeError(f"pathofexile-dat failed ({rc}):\n{out[-2000:]}")
+            # The tool exits 0 even when a table is missing a column, so scan its output. A
+            # table changing shape is a real breakage and must fail loudly.
+            if "doesn't have a column named" in out:
+                bad = [ln for ln in out.splitlines() if "doesn't have a column" in ln]
+                raise RuntimeError("dat-schema mismatch (a table changed shape):\n  "
+                                   + "\n  ".join(bad))
+            if rc == 0:
+                return wanted
 
-    raise RuntimeError("pathofexile-dat kept failing after dropping every optional file")
+            m = _MISSING_PATH.search(out) if "NoFileInfoError" in out else None
+            if m and m.group(1) == main:
+                print(f"  note: no {main} in this patch; trying the next extension")
+                break
+            if m and m.group(1) in optional and m.group(1) in wanted:
+                print(f"  note: {m.group(1)} is not in this patch; skipping")
+                wanted.remove(m.group(1))
+                continue
+            raise RuntimeError(f"pathofexile-dat failed ({rc}):\n{out[-2000:]}")
+        else:
+            raise RuntimeError(
+                "pathofexile-dat kept failing after dropping every optional file")
+
+    raise RuntimeError("no stat_descriptions file under any known extension: "
+                       + ", ".join(DESCRIPTION_EXTENSIONS))
 
 
 def table(workdir: Path, name: str) -> list[dict]:
@@ -158,14 +185,18 @@ def indexable_names(workdir: Path) -> dict[str, list[str]]:
 
 
 def stat_descriptions_path(workdir: Path) -> Path:
-    return workdir / "files" / STAT_DESCRIPTIONS.replace("/", "@")
+    """The main description file that landed, or the newest format's path if none did."""
+    for ext in DESCRIPTION_EXTENSIONS:
+        p = workdir / "files" / _description_files(ext)[0].replace("/", "@")
+        if p.exists():
+            return p
+    return workdir / "files" / _description_files(DESCRIPTION_EXTENSIONS[0])[0].replace("/", "@")
 
 
 def description_paths(workdir: Path) -> list[Path]:
     """Every stat-description file that landed, main one first."""
-    d = workdir / "files"
-    if not d.is_dir():
+    main = stat_descriptions_path(workdir)
+    if not main.exists():
         return []
-    main = d / STAT_DESCRIPTIONS.replace("/", "@")
-    rest = sorted(p for p in d.glob("*stat_descriptions.txt") if p != main)
-    return ([main] if main.exists() else []) + rest
+    rest = sorted(p for p in main.parent.glob("*stat_descriptions" + main.suffix) if p != main)
+    return [main] + rest

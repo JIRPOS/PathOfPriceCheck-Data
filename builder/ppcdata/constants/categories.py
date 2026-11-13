@@ -88,6 +88,9 @@ TRADE_CATEGORY_BY_CLASS_ID = {
     "MediumRelic": "sanctum.relic",
     "LargeRelic": "sanctum.relic",
     "ExpeditionLogbook": "logbook",
+    # 3.30. Trade splits it by body part (viscera.head/.arm/.body/.leg), which the class does
+    # not say; the base type in the query narrows it the rest of the way.
+    "Viscera": "viscera",
 }
 
 # Classes with no trade category on purpose: they are never listed for sale, so constraining

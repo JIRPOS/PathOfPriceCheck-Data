@@ -1,4 +1,4 @@
-"""Parser for the game's ``Metadata/StatDescriptions/stat_descriptions.txt``.
+"""Parser for the game's ``Metadata/StatDescriptions/stat_descriptions.csd`` (``.txt`` before 3.30).
 
 This is where the wordings the trade API cannot give us come from: the "reduced" phrasing of
 a stat indexed as "increased", fixed-value forms like "No Physical Damage", and the decimal
@@ -16,6 +16,10 @@ Format (UTF-16LE, CRLF), one block per description::
         ...
 
 One range spec per stat id precedes the quoted text. Trailing words are modifiers.
+
+From 3.30 a wording can carry markup the client resolves before it prints: ``[Onslaught]``,
+``[SuspendInTime::20|Suspend in Time]``, ``[BattlemagesCry<gemlevel={0}>|...]``.
+The clipboard and the trade text show only the display part, so that is what is kept.
 """
 
 from __future__ import annotations
@@ -28,6 +32,18 @@ from dataclasses import dataclass, field
 # order ("... by level {2} {1}"), so they are kept rather than discarded.
 _PLACEHOLDER = re.compile(r"\{(\d*)(?::[^}]*)?\}")
 _QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+# "[key|display]" keeps the display, "[display]" keeps itself. The key may hold a placeholder
+# ("::{0}", "<gemlevel={0}>") that names a skill's level, not a number the text prints, so this
+# runs before placeholders are counted. "[DNT]" — do not translate — marks a development-only
+# wording; it stays, because stripping it would let one collide with the live wording it copies.
+_MARKUP_KEYED = re.compile(r"\[[^\[\]|]*\|([^\[\]]*)\]")
+_MARKUP_BARE = re.compile(r"\[(?!DNT\])([^\[\]|]*)\]")
+
+
+def strip_markup(text: str) -> str:
+    """The wording as the client prints it, with 3.30's link markup resolved."""
+    return _MARKUP_BARE.sub(r"\1", _MARKUP_KEYED.sub(r"\1", text))
 
 # A trailing "display_indexable_skill 2" says the stat in that slot is a **row number** in a
 # client table, not a number to print: the game renders the name it finds there. The argument
@@ -108,7 +124,7 @@ def _parse_variant(line: str, n_stats: int) -> Variant | None:
     # carries the break itself, so leaving the escape undecoded means no multi-line wording ever
     # joins to its trade record. That is 568 variants, and it costs them their negate and
     # fixed-value forms in stats.ndjson and their trade id in unique-mods.ndjson.
-    raw_text = m.group(1).replace('\\"', '"').replace("\\n", "\n")
+    raw_text = strip_markup(m.group(1).replace('\\"', '"').replace("\\n", "\n"))
 
     placeholders: list[int] = []
 

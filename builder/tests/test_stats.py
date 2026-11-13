@@ -129,6 +129,17 @@ def test_a_wording_with_no_description_keeps_the_trade_text():
     assert st["unmatched"] == 1
 
 
+def test_a_wording_with_no_words_is_dropped_not_matched_against_any_number():
+    # 3.30's fishing lure and hook stats, as trade lists them.
+    trade = _trade(("explicit", "explicit.stat_3360430812", "#"),
+                   ("explicit", "explicit.stat_2054162825", "#"),
+                   ("pseudo", "pseudo.pseudo_total_life", "+# total maximum Life"))
+    records, st = _build(trade, [])
+
+    assert [_strings(r) for r in records] == [["# total maximum Life"]]
+    assert st["wordless_trade_wordings_dropped"] == ["#"]
+
+
 def test_a_literal_sign_in_the_description_is_folded_into_the_placeholder():
     # GGG writes this one's sign as literal text — `"+{0}% Monster Chaos Resistance"` — where
     # `{0:+d} to maximum Life` hides it in the format spec. The client cannot tell those apart:

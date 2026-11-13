@@ -55,8 +55,10 @@ normalized wording:
 
 Neither alone is enough. The trade API has no wording for the "reduced" phrasing of a stat
 it indexes as "increased", and no entry at all for fixed-value wordings like
-`No Physical Damage`; those come from `stat_descriptions.txt`. The game files have no trade
-hashes.
+`No Physical Damage`; those come from `stat_descriptions.csd` (`.txt` before 3.30, same
+grammar). Since 3.30 a wording there can carry link markup such as
+`[SuspendInTime::20|Suspend in Time]`, which the client resolves before it prints, so the
+builder keeps only the display part. The game files have no trade hashes.
 
 The join key is the `#`-placeholder form of the wording — see
 [NORMALIZATION.md](NORMALIZATION.md), which the client reimplements and is tested against
@@ -297,7 +299,7 @@ than the whole build.
 * Icons are stored as CDN URL strings. No game art is redistributed.
 * **English only.** Every asset is language-prefixed and `manifest.json` declares a `languages`
   list, so the format has always anticipated more — but `LANG` is `"en"`, only the English
-  `stat_descriptions.txt` files are fetched, and no other language is built. Adding one means
+  wordings in the stat-description files are read, and no other language is built. Adding one means
   pulling GGG's localised description files and emitting a second set of assets; nothing in the
   schema has to change for it.
 * The wiki lags a league launch by days. A new unique simply has no `en-unique-mods.ndjson`

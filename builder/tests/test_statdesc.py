@@ -127,3 +127,44 @@ def test_a_range_spec_pins_a_variant_or_spans_values():
     assert statdesc.spec_accepts("1|#", 3, 3)
     assert not statdesc.spec_accepts("#|-1", 3, 3)
     assert statdesc.spec_accepts("#", 3, 3)
+
+
+# Real 3.30 blocks. The skill's level appears inside the link key as well as in the text, and
+# only the one in the text is a number the client prints.
+MARKUP = textwrap.dedent("""\
+    description
+    \t1 local_display_grants_restless_dead_skill_level_x
+    \t1
+    \t\t1|# "Trigger level {0} [CeaselessFleshUnique::{0}|Ceaseless Flesh] once every second"
+    description
+    \t1 local_display_grants_skill_battlemages_cry_level
+    \t1
+    \t\t# "Grants Level {0} [BattlemagesCry<gemlevel={0}>|Battlemage's Cry] Skill"
+    description
+    \t1 local_display_socketed_golem_skill_grants_onslaught_when_summoned
+    \t1
+    \t\t# "Gain [Onslaught] for {0} seconds when you Cast Socketed Golem Skill" milliseconds_to_seconds 1
+    description
+    \t1 local_display_grants_skill_oozing_aura_level
+    \t1
+    \t\t# "[DNT] Grants Level {0} Oozing Aura Skill"
+    """)
+
+
+def test_link_markup_keeps_only_what_the_client_prints(tmp_path):
+    texts = [d.variants[0].text for d in _parse(tmp_path, MARKUP)]
+    assert texts[:3] == [
+        "Trigger level # Ceaseless Flesh once every second",
+        "Grants Level # Battlemage's Cry Skill",
+        "Gain Onslaught for # seconds when you Cast Socketed Golem Skill",
+    ]
+
+
+def test_a_placeholder_inside_a_link_key_is_not_counted(tmp_path):
+    descs = _parse(tmp_path, MARKUP)
+    assert descs[0].variants[0].placeholders == [0]
+    assert descs[1].variants[0].placeholders == [0]
+
+
+def test_dnt_stays_so_it_cannot_pass_for_a_live_wording(tmp_path):
+    assert _parse(tmp_path, MARKUP)[3].variants[0].text == "[DNT] Grants Level # Oozing Aura Skill"
