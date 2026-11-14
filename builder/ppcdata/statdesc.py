@@ -47,11 +47,16 @@ def strip_markup(text: str) -> str:
 
 # A trailing "display_indexable_skill 2" says the stat in that slot is a **row number** in a
 # client table, not a number to print: the game renders the name it finds there. The argument
-# is the stat's 1-based position in the block's own list. Two tables, three spellings.
+# is the stat's 1-based position in the block's own list.
+#
+# 3.30 added "minion_doubling_type": The Dark Monarch's sixteen wordings, one per minion type,
+# became one wording that names the type twice ("Maximum number of {0} is Doubled\nCannot have
+# Minions other than {0}"). Without it that modifier is a single "#" filter with no trade id.
 INDEXABLE_TABLES = {
     "display_indexable_skill": "skill",
     "display_indexable_support": "support",
     "display_indexable_non_active_support": "support",
+    "minion_doubling_type": "minion_doubling",
 }
 
 

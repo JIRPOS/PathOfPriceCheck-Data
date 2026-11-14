@@ -234,8 +234,9 @@ mod is an implicit.
 `count: [1, 1]`: The Dark Monarch doubles the limit of one of sixteen minion types, Replica
 Dragonfang's Flight raises one of 287 skill gems, Forbidden Shako supports one of 164 support
 gems in one of four equipment slots. The client states it two ways — a description with one
-wording per value, or a `display_indexable_skill` / `display_indexable_support` modifier naming
-the table the value is a row in — and trade indexes one id per option, so the join stays by
+wording per value, or a `display_indexable_skill` / `display_indexable_support` /
+`minion_doubling_type` modifier naming the table the value is a row in (3.30 moved The Dark
+Monarch from the first shape to the second) — and trade indexes one id per option, so the join stays by
 wording, never by assuming trade numbers its options the way the client numbers its rows. The
 wiki calls such a mod fixed and is right: every copy has it, and what varies is which one it is.
 

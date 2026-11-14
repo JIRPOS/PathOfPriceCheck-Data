@@ -97,19 +97,22 @@ def _truthy(v) -> bool:
 
 
 def _substitute(text: str, placeholders: list[int], stat_index: int, name: str) -> str | None:
-    """Replace the '#' that stands for `stat_index` with `name`.
+    """Replace every '#' that stands for `stat_index` with `name`.
 
     Which '#' that is comes from the description's own ``{N}`` numbering, not from counting:
     "Skills Socketed in your Helmet are Supported by level {2} {1}" prints its two stats in
-    the opposite order to the order it lists them.
+    the opposite order to the order it lists them. And one stat can be printed twice — 3.30's
+    "Maximum number of {0} is Doubled\nCannot have Minions other than {0}".
     """
     if stat_index not in placeholders:
         return None
-    nth = placeholders.index(stat_index)
     parts = text.split("#")
-    if nth >= len(parts) - 1:
+    if len(parts) - 1 != len(placeholders):
         return None
-    return "#".join(parts[:nth + 1]) + name + "#".join(parts[nth + 1:])
+    out = parts[0]
+    for p, rest in zip(placeholders, parts[1:]):
+        out += (name if p == stat_index else "#") + rest
+    return out
 
 
 class _Resolver(ModResolver):

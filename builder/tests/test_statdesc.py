@@ -91,6 +91,11 @@ MULTILINE = textwrap.dedent("""\
     \t1
     \t\t1 # # "Skills Socketed in your Helmet are Supported by level {2} {1}" \\
 display_indexable_non_active_support 2
+    description
+    \t1 maximum_number_of_X_minion_type_doubled
+    \t1
+    \t\t# "Maximum number of {0} is Doubled\\nCannot have Minions other than {0}" \\
+minion_doubling_type 1
     """)
 
 
@@ -168,3 +173,11 @@ def test_a_placeholder_inside_a_link_key_is_not_counted(tmp_path):
 
 def test_dnt_stays_so_it_cannot_pass_for_a_live_wording(tmp_path):
     assert _parse(tmp_path, MARKUP)[3].variants[0].text == "[DNT] Grants Level # Oozing Aura Skill"
+
+
+def test_a_minion_type_is_a_row_number_printed_twice(tmp_path):
+    # 3.30 folded The Dark Monarch's sixteen wordings into this one.
+    d = _parse_multiline(tmp_path)[3]
+    assert d.variants[0].text == "Maximum number of # is Doubled\nCannot have Minions other than #"
+    assert d.variants[0].placeholders == [0, 0]
+    assert d.variants[0].indexable == ("minion_doubling", 0)

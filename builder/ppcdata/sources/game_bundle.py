@@ -90,11 +90,14 @@ TABLES = [
     # tables; that is GGG's shape, not a typo here.
     {"name": "IndexableSkillGems", "columns": ["Name1"]},
     {"name": "IndexableSupportGems", "columns": ["Name"]},
+    # 3.30: the minion type The Dark Monarch doubles, by the same one-based row number.
+    {"name": "MinionDoublingStatTypes", "columns": ["Name"]},
 ]
 
 #: statdesc's table name -> (dat table, its display-name column).
 INDEXABLE_TABLES = {"skill": ("IndexableSkillGems", "Name1"),
-                    "support": ("IndexableSupportGems", "Name")}
+                    "support": ("IndexableSupportGems", "Name"),
+                    "minion_doubling": ("MinionDoublingStatTypes", "Name")}
 
 
 def write_config(workdir: Path, patch: str, files: list[str]) -> None:

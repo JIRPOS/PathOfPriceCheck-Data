@@ -286,3 +286,28 @@ def test_a_table_too_short_for_the_roll_expands_nothing():
                          indexables=INDEXABLES)
     assert "pools" not in recs[0]
     assert stats["mods_rolling_a_named_option"] == 0
+
+
+# 3.30's shape of the same modifier: one wording, the type a row number, printed twice.
+DOUBLING_TEXT = "Maximum number of # is Doubled\nCannot have Minions other than #"
+
+
+def test_a_name_printed_twice_is_substituted_twice():
+    recs, stats = _build(
+        [_row("Test Ring", "DoubleMinionUnique__1")],
+        descs=DESCS + [Description(stat_ids=["minion_type_doubled"], variants=[
+            Variant(ranges=["#"], text=DOUBLING_TEXT, placeholders=[0, 0],
+                    indexable=("minion_doubling", 0))])],
+        records=RECORDS + [
+            _rec(DOUBLING_TEXT.replace("#", n), {"explicit": [f"explicit.stat_double|{i}"]})
+            for i, n in enumerate(["Zombies", "Skeletons", "Spectres"], 1)],
+        mods=OPTION_MODS, stats=OPTION_STATS,
+        indexables={"minion_doubling": ["Zombies", "Skeletons", "Spectres"]})
+    assert "fixed" not in recs[0]
+    pool = recs[0]["pools"][0]
+    assert [f["ref"] for e in pool["mods"] for f in e["filters"]] == [
+        DOUBLING_TEXT.replace("#", n) for n in ("Zombies", "Skeletons", "Spectres")]
+    assert [f["tradeId"] for e in pool["mods"] for f in e["filters"]] == [
+        "explicit.stat_double|1", "explicit.stat_double|2", "explicit.stat_double|3"]
+    assert all(f["range"] == [] for e in pool["mods"] for f in e["filters"])
+    assert stats["named_options_without_trade_id"] == 0
