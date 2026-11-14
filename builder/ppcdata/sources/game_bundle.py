@@ -92,6 +92,8 @@ TABLES = [
     {"name": "IndexableSupportGems", "columns": ["Name"]},
     # 3.30: the minion type The Dark Monarch doubles, by the same one-based row number.
     {"name": "MinionDoublingStatTypes", "columns": ["Name"]},
+    # Every word of the client's UI under a stable id; the lexicon's flag lines come from here.
+    {"name": "ClientStrings", "columns": ["Id", "Text"]},
 ]
 
 #: statdesc's table name -> (dat table, its display-name column).

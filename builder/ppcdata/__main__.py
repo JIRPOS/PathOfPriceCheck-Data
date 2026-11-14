@@ -19,6 +19,7 @@ from .constants.categories import INTENTIONALLY_UNMAPPED, TRADE_CATEGORY_BY_CLAS
 from .constants.known_stats import BETTER_MINUS_ONE, TRADE_INVERTED
 from .emit import index as emit_index
 from .emit import items as emit_items
+from .emit import lexicon as emit_lexicon
 from .emit import manifest as emit_manifest
 from .emit import mod_pools as emit_mod_pools
 from .emit import stats as emit_stats
@@ -227,6 +228,16 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     _write_ndjson(out / "item-classes.ndjson", class_records)
 
+    lexicon, lex_report = emit_lexicon.build(game_bundle.table(work, "ClientStrings"), LANG)
+    (out / f"{LANG}-lexicon.json").write_text(
+        json.dumps(lexicon, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(f"  item states: {len(lexicon['item_states'])}")
+    if lex_report["unclassified"]:
+        print(f"  unclassified flag lines (emitted unsearched; classify in "
+              f"constants/item_states.py): {', '.join(lex_report['unclassified'])}")
+    if lex_report["missing"]:
+        print(f"  ItemPopup ids the client no longer has: {', '.join(lex_report['missing'])}")
+
     _write_vectors(out, stat_records)
 
     data_version = args.data_version or _dt.datetime.now(_dt.UTC).strftime("%Y%m%d") + ".0"
@@ -384,6 +395,8 @@ def cmd_vectors(args: argparse.Namespace) -> int:
 def _keys(path: Path, fn) -> set[str]:
     if not path.exists():
         return set()
+    if path.suffix == ".json":
+        return {fn(r) for r in json.loads(path.read_text(encoding="utf-8")).get("item_states", [])}
     return {fn(json.loads(line)) for line in path.open(encoding="utf-8") if line.strip()}
 
 
@@ -406,6 +419,9 @@ def cmd_notes(args: argparse.Namespace) -> int:
         # league that reworded a map mod is exactly what this diff is read for.
         ("pool modifiers", f"{LANG}-mod-pools.ndjson",
          lambda r: f"{r['domain']}/{r['gen']} " + " | ".join(s["ref"] for s in r["stats"])),
+        # A new flag line is the first thing a league launch needs classified.
+        ("item states", f"{LANG}-lexicon.json",
+         lambda r: f"{r['text']} -> {r['trade_filter'] or '(not searched)'}"),
     ):
         before, after = _keys(old / fname, key), _keys(new / fname, key)
         if not before:
