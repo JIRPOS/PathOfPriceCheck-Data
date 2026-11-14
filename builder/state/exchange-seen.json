@@ -1,5 +1,5 @@
 {
- "last_hour": 1794632400,
+ "last_hour": 1794654000,
  "ids": [
   "Metadata/Items/AtlasExiles/AddModToRareCrusader",
   "Metadata/Items/AtlasExiles/AddModToRareHunter",
@@ -999,6 +999,7 @@
   "Metadata/Items/MapFragments/CleansedAllflamePack",
   "Metadata/Items/MapFragments/CloisterAllflamePack",
   "Metadata/Items/MapFragments/CurrencyAfflictionFragment",
+  "Metadata/Items/MapFragments/CurrencyAuguryBossKey",
   "Metadata/Items/MapFragments/CurrencyBreachFragmentChaos",
   "Metadata/Items/MapFragments/CurrencyBreachFragmentChaos5",
   "Metadata/Items/MapFragments/CurrencyBreachFragmentCold",
