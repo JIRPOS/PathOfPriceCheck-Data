@@ -27,6 +27,7 @@ build, not a new binary.
 | `en-mod-pools-ref.index.bin` | fnv1a32 index, key `"{domain}::{wording}"` |
 | `item-classes.ndjson` | the clipboard's `Item Class:` line → trade category slug, and the mod domain its bases agree on |
 | `en-lexicon.json` | flag lines the client prints that the app has no field for (from `ClientStrings`), each with the trade filter it maps to, if any — classified in `builder/ppcdata/constants/item_states.py` |
+| `renamed-refs.json` | pool wordings a patch reworded, old ref → current ref, so a map-check verdict follows the rewording — curated in `builder/ppcdata/constants/renamed_refs.py`, with candidates proposed by `notes` |
 | `stat-normalization-vectors.ndjson` | conformance suite for the client's normalizer |
 | `fnv1a-vectors.json` | hash agreement vectors |
 

@@ -11,17 +11,20 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import sys
 from pathlib import Path
 
 from . import normalize, statdesc
 from .constants.categories import INTENTIONALLY_UNMAPPED, TRADE_CATEGORY_BY_CLASS_ID
 from .constants.known_stats import BETTER_MINUS_ONE, TRADE_INVERTED
+from .constants.renamed_refs import NOT_RENAMED, RENAMED
 from .emit import index as emit_index
 from .emit import items as emit_items
 from .emit import lexicon as emit_lexicon
 from .emit import manifest as emit_manifest
 from .emit import mod_pools as emit_mod_pools
+from .emit import renamed_refs as emit_renamed_refs
 from .emit import stats as emit_stats
 from .emit import unique_mods as emit_unique_mods
 from .sources import exchange, game_bundle, patch as patch_src, trade_api, wiki
@@ -228,6 +231,14 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     _write_ndjson(out / "item-classes.ndjson", class_records)
 
+    renamed, dropped = emit_renamed_refs.build(
+        RENAMED, {s["ref"] for r in pool_records for s in r["stats"]})
+    (out / "renamed-refs.json").write_text(
+        json.dumps(renamed, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(f"  renamed refs: {len(renamed['renamed'])}")
+    for d in dropped:
+        print(f"  renamed ref left out: {d}")
+
     lexicon, lex_report = emit_lexicon.build(game_bundle.table(work, "ClientStrings"), LANG)
     (out / f"{LANG}-lexicon.json").write_text(
         json.dumps(lexicon, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -400,6 +411,12 @@ def _keys(path: Path, fn) -> set[str]:
     return {fn(json.loads(line)) for line in path.open(encoding="utf-8") if line.strip()}
 
 
+def _records(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.open(encoding="utf-8") if line.strip()]
+
+
 def cmd_notes(args: argparse.Namespace) -> int:
     """Release notes as a diff against the previous bundle.
 
@@ -440,6 +457,21 @@ def cmd_notes(args: argparse.Namespace) -> int:
             out.append(f"  - removed `{name}`")
         if len(removed) > 25:
             out.append(f"  - ... and {len(removed) - 25} more removals")
+
+    old_pool, new_pool = _records(old / f"{LANG}-mod-pools.ndjson"), _records(
+        new / f"{LANG}-mod-pools.ndjson")
+    if old_pool and new_pool:
+        found = emit_renamed_refs.detect(old_pool, new_pool)
+        open_ = {w: n for w, n in found.items()
+                 if RENAMED.get(w) != n and NOT_RENAMED.get(w) != n}
+        out.append(f"- **reworded pool modifiers to classify**: {len(open_)}")
+        for w, n in sorted(open_.items()):
+            out.append(f"  - `{w}` -> `{n}`")
+            # Only the first build after a patch diffs across it; every later one compares the
+            # patch with itself and lists nothing, so this cannot be left to the notes alone.
+            if os.environ.get("GITHUB_ACTIONS"):
+                print(f"::warning::reworded pool modifier to classify in "
+                      f"constants/renamed_refs.py: {w!r} -> {n!r}")
 
     m = json.loads((new / "manifest.json").read_text())
     header = [f"Game patch `{m['game_patch']}`, schema v{m['schema_version']}.", ""]
