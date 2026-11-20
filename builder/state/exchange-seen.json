@@ -1,5 +1,5 @@
 {
- "last_hour": 1795114800,
+ "last_hour": 1795154400,
  "ids": [
   "Metadata/Items/AtlasExiles/AddModToRareCrusader",
   "Metadata/Items/AtlasExiles/AddModToRareHunter",
@@ -135,6 +135,7 @@
   "Metadata/Items/Currency/CurrencyAddModToMagic",
   "Metadata/Items/Currency/CurrencyAddModToRare",
   "Metadata/Items/Currency/CurrencyAddModToRareElder",
+  "Metadata/Items/Currency/CurrencyAddModToRareOriginator",
   "Metadata/Items/Currency/CurrencyAddModToRareShaper",
   "Metadata/Items/Currency/CurrencyAddModToRareShard",
   "Metadata/Items/Currency/CurrencyAddZanaInfluence",
@@ -402,6 +403,7 @@
   "Metadata/Items/Currency/CurrencyRerollUniqueShard",
   "Metadata/Items/Currency/CurrencyRitualSplinter",
   "Metadata/Items/Currency/CurrencyRitualStone",
+  "Metadata/Items/Currency/CurrencyStackedExalt",
   "Metadata/Items/Currency/CurrencyStrongboxQuality",
   "Metadata/Items/Currency/CurrencyStrongboxQualityShard",
   "Metadata/Items/Currency/CurrencyUpgradeInfluenceMod",
