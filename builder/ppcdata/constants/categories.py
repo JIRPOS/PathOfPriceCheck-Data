@@ -102,3 +102,13 @@ INTENTIONALLY_UNMAPPED = {
     "InstanceLocalItem", "ArchnemesisMod", "MetamorphosisDNA", "SentinelDrone", "VaultKey",
     "AnimalCharm", "NecropolisPack", "Gold", "UniqueShard", "UniqueShardBase",
 }
+
+
+# Mod domain -> trade category, for the bases whose item class spans two trade categories and
+# so cannot answer for them. The clipboard prints every cluster jewel as ``Item Class: Jewels``,
+# which maps to ``jewel.base``, and trade lists none there: a cluster query under it returns
+# nothing. Domain 21 is ``AFFLICTION_JEWEL``, the three cluster bases and nothing else.
+# Emitted on the base record as ``tradeCategory``; a client prefers it to the class's.
+TRADE_CATEGORY_BY_DOMAIN = {
+    21: "jewel.cluster",
+}

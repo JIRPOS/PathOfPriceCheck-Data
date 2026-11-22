@@ -79,6 +79,17 @@ def test_a_base_carries_the_mod_domain_it_generates_from():
     assert recs["Two-Stone Ring"]["domain"] == 1
 
 
+def test_a_cluster_jewel_names_its_own_trade_category():
+    # "Jewels" maps to jewel.base, and trade lists no cluster jewel there.
+    recs = _records([
+        _base(1, "Large Cluster Jewel", "Metadata/Items/Jewels/JewelPassiveTreeExpansionLarge", 21),
+        _base(2, "Cobalt Jewel", "Metadata/Items/Jewels/JewelInt", 10),
+    ])
+    assert recs["Large Cluster Jewel"]["tradeCategory"] == "jewel.cluster"
+    # Every other base leaves the answer to its class.
+    assert "tradeCategory" not in recs["Cobalt Jewel"]
+
+
 def test_a_trade_proxy_states_no_domain_because_it_is_not_an_item():
     # Trade lists all 491 maps under one "Map", whose game row is a stand-in sitting with the
     # stackable currency in domain 43. Copying that would tell a client every map in the game

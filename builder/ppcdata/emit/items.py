@@ -8,6 +8,7 @@ what trade omits — inventory size, drop level, item class and armour ranges.
 
 from __future__ import annotations
 
+from ..constants.categories import TRADE_CATEGORY_BY_DOMAIN
 from ..sources.trade_api import item_entries
 
 # Trade's group ids map onto our record namespaces.
@@ -206,6 +207,8 @@ def build(trade_items: dict, bases: list[dict], classes: list[dict],
                 # `build_classes`.
                 if g.get("ModDomain") is not None and not g["Id"].startswith(_TRADE_PROXY):
                     rec["domain"] = g["ModDomain"]
+                    if cat_override := TRADE_CATEGORY_BY_DOMAIN.get(g["ModDomain"]):
+                        rec["tradeCategory"] = cat_override
                 cat = class_name_by_row.get(g.get("ItemClassesKey"))
                 if cat:
                     rec["craftable"] = {"category": cat}

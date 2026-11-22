@@ -14,7 +14,7 @@ build, not a new binary.
 | asset | what it is |
 |---|---|
 | `manifest.json` | schema/data version, game patch, per-file sha256 and size, absolute URLs |
-| `en-items.ndjson` | base types, uniques, gems, divination cards, captured beasts — including each base's `Metadata/Items/…` id and mod domain, whether it has ever traded on the in-game currency exchange, and each unique's artwork path |
+| `en-items.ndjson` | base types, uniques, gems, divination cards, captured beasts — including each base's `Metadata/Items/…` id and mod domain, whether it has ever traded on the in-game currency exchange, a `tradeCategory` where the base's item class cannot answer for it (cluster jewels), and each unique's artwork path |
 | `en-items-name.index.bin` | fnv1a32 index, key `"{namespace}::{name}"` |
 | `en-items-ref.index.bin` | fnv1a32 index, key `"{namespace}::{refName}"` |
 | `en-items-base.index.bin` | fnv1a32 index over uniques only, key `"UNIQUE::{unique.base}"` — which uniques drop on a base, which is all an unidentified one states |
