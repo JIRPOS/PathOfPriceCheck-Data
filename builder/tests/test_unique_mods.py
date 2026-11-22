@@ -311,3 +311,52 @@ def test_a_name_printed_twice_is_substituted_twice():
         "explicit.stat_double|1", "explicit.stat_double|2", "explicit.stat_double|3"]
     assert all(f["range"] == [] for e in pool["mods"] for f in e["filters"])
     assert stats["named_options_without_trade_id"] == 0
+
+
+def test_a_mod_listing_its_stats_out_of_the_descriptions_order_still_resolves():
+    # Forbidden Shako: the mod is (gem index, level), the wording "Supported by Level {0} {1}"
+    # is (level, index). Looked up in the mod's order it matched nothing and the modifier was
+    # dropped from the record without a word.
+    stats = STATS + [{"_index": 20, "Id": "random_support_index"},
+                     {"_index": 21, "Id": "random_support_level"}]
+    descs = DESCS + [Description(
+        stat_ids=["random_support_level", "random_support_index"],
+        variants=[Variant(ranges=["#", "#"], text="Socketed Gems are Supported by Level # #",
+                          placeholders=[0, 1], indexable=("support", 1))])]
+    records = RECORDS + [
+        _rec("Socketed Gems are Supported by Level # Pierce",
+             {"explicit": ["explicit.indexable_support_1"]}),
+        _rec("Socketed Gems are Supported by Level # Fork",
+             {"explicit": ["explicit.indexable_support_2"]})]
+    mods = MODS + [{"_index": 20, "Id": "RandomSupportUnique__1",
+                    "StatsKey1": 20, "Stat1Min": 1, "Stat1Max": 2,
+                    "StatsKey2": 21, "Stat2Min": 1, "Stat2Max": 10}]
+    recs, _ = _build([_row("Test Ring", "RandomSupportUnique__1")], descs=descs,
+                     records=records, mods=mods, stats=stats,
+                     indexables={"support": ["Pierce", "Fork"]})
+    pool = recs[0]["pools"][0]
+    assert [f["tradeId"] for e in pool["mods"] for f in e["filters"]] == [
+        "explicit.indexable_support_1", "explicit.indexable_support_2"]
+    # The level is the range left over, read from its own slot rather than the index's.
+    assert all(f["range"] == [[1, 10]] for e in pool["mods"] for f in e["filters"])
+
+
+def test_a_roll_that_can_only_be_one_name_is_that_names_wording():
+    # Thread of Hope's second ring mod always rolls the fifth size. One option is not a pool,
+    # but the bare "Only affects Passives in # Ring" has no trade id; "Massive Ring" does.
+    stats = STATS + [{"_index": 30, "Id": "ring_radius"}]
+    descs = DESCS + [Description(stat_ids=["ring_radius"], variants=[
+        Variant(ranges=["#"], text="Only affects Passives in # Ring", placeholders=[0],
+                indexable=("jewel_radius", 0))])]
+    records = RECORDS + [_rec("Only affects Passives in Massive Ring",
+                              {"explicit": ["explicit.stat_ring|5"]})]
+    mods = MODS + [{"_index": 30, "Id": "RingUnique__2", "StatsKey1": 30,
+                    "Stat1Min": 5, "Stat1Max": 5}]
+    recs, _ = _build([_row("Test Ring", "RingUnique__2")], descs=descs, records=records,
+                     mods=mods, stats=stats,
+                     indexables={"jewel_radius": ["Small", "Medium", "Large", "Very Large",
+                                                  "Massive"]})
+    assert "pools" not in recs[0]
+    assert recs[0]["fixed"][0]["filters"] == [
+        {"ref": "Only affects Passives in Massive Ring", "range": [],
+         "tradeId": "explicit.stat_ring|5"}]

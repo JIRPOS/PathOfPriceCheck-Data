@@ -56,8 +56,18 @@ class ModResolver:
         # First writer wins, matching statdesc.by_english_text: the canonical block precedes
         # its skill-specific overrides.
         self.desc_by_stats: dict[tuple[str, ...], Description] = {}
+        # The same, whatever the order: a mod need not list its stats in the order their
+        # description does. Forbidden Shako's mod is (gem index, level) and the wording
+        # "Supported by Level {0} {1}" is (level, index); an exact-order lookup found nothing
+        # and the modifier vanished from the record. Only a set naming one description counts.
+        self.desc_by_set: dict[frozenset[str], Description | None] = {}
         for d in descs:
             self.desc_by_stats.setdefault(tuple(d.stat_ids), d)
+            key = frozenset(d.stat_ids)
+            if len(key) == len(d.stat_ids):
+                held = self.desc_by_set.get(key, d)
+                self.desc_by_set[key] = d if held is d or tuple(held.stat_ids) == tuple(
+                    d.stat_ids) else None
 
         # Every wording a record answers to, so a description reaches its record through any
         # of its variants and not just the primary one.
@@ -163,8 +173,16 @@ class ModResolver:
         while i < len(stats):
             d = None
             span = 0
+            run = stats[i:i]
             for n in range(min(MAX_SPAN, len(stats) - i), 0, -1):
-                d = self.desc_by_stats.get(tuple(s[0] for s in stats[i:i + n]))
+                run = stats[i:i + n]
+                d = self.desc_by_stats.get(tuple(s[0] for s in run))
+                if d is None and n > 1:
+                    d = self.desc_by_set.get(frozenset(s[0] for s in run))
+                    if d is not None:
+                        # In the description's order, which is what its placeholders number.
+                        by_id = {s[0]: s for s in run}
+                        run = [by_id[sid] for sid in d.stat_ids]
                 if d is not None:
                     span = n
                     break
@@ -175,5 +193,5 @@ class ModResolver:
                     self.counts["stats_without_description"] += 1
                 i += 1
                 continue
-            yield d, stats[i:i + span]
+            yield d, run
             i += span

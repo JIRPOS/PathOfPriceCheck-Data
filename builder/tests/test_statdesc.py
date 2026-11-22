@@ -181,3 +181,17 @@ def test_a_minion_type_is_a_row_number_printed_twice(tmp_path):
     assert d.variants[0].text == "Maximum number of # is Doubled\nCannot have Minions other than #"
     assert d.variants[0].placeholders == [0, 0]
     assert d.variants[0].indexable == ("minion_doubling", 0)
+
+
+def test_a_ring_size_is_a_row_number(tmp_path):
+    # 3.30 folded Thread of Hope's one wording per ring size into one that names the size.
+    p = tmp_path / "radius.csd"
+    p.write_text(textwrap.dedent("""\
+        description
+        \t1 local_jewel_variable_ring_radius_value
+        \t1
+        \t\t# "Only affects Passives in {0} Ring" passive_jewel_radius 1
+        """), encoding="utf-16")
+    d = statdesc.parse(str(p))[0]
+    assert d.variants[0].text == "Only affects Passives in # Ring"
+    assert d.variants[0].indexable == ("jewel_radius", 0)

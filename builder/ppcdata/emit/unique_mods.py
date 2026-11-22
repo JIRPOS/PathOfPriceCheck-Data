@@ -125,8 +125,8 @@ class _Resolver(ModResolver):
                             "named_options_without_trade_id": 0,
                             "mods_over_the_option_cap": []})
 
-    def _named_options(self, d: Description,
-                       span: list[tuple[str, int, int]]) -> list[tuple[str, list[int]]] | None:
+    def _named_options(self, d: Description, span: list[tuple[str, int, int]],
+                       single: bool = False) -> list[tuple[str, list[int]]] | None:
         """``[(wording, stat indices still placeheld)]`` when this span's roll is a name.
 
         Two shapes, and a modifier can be both at once. A description may render **one
@@ -135,7 +135,8 @@ class _Resolver(ModResolver):
         client table of names. Forbidden Shako is both: four equipment slots as variants,
         times 164 support gems as an index.
 
-        None when neither applies, which is every ordinary modifier.
+        None when neither applies, which is every ordinary modifier. ``single`` also answers
+        for a roll that names exactly one option — not a pool, but a wording of its own.
         """
         pins = [pinned_value(v.ranges[0]) if v.ranges else None for v in d.variants]
         lo0, hi0 = span[0][1], span[0][2]
@@ -171,7 +172,7 @@ class _Resolver(ModResolver):
                     return None
                 out.append((text, rest))
 
-        if len(out) < 2:
+        if len(out) < (1 if single else 2):
             return None
         return out
 
@@ -195,6 +196,13 @@ class _Resolver(ModResolver):
 
         out: list[dict] = []
         for d, span in self.spans(self.mod_stats(mod)):
+            # A roll that can only be one name — Thread of Hope's Massive Ring — is that name's
+            # wording, which is the one trade indexes; the bare "#" form has no id at all.
+            named = (self._named_options(d, span, single=True)
+                     if any(v.indexable for v in d.variants) else None)
+            if named and len(named) == 1:
+                out.append(self._filter_for(d, implicit, named[0][0], named[0][1], span))
+                continue
             ref, trade_id, dp = self.resolve(d, implicit)
             f: dict = {"ref": ref,
                        "range": [[_scaled(lo, dp), _scaled(hi, dp)] for _, lo, hi in span]}

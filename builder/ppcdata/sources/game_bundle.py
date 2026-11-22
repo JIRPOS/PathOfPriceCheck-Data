@@ -92,14 +92,19 @@ TABLES = [
     {"name": "IndexableSupportGems", "columns": ["Name"]},
     # 3.30: the minion type The Dark Monarch doubles, by the same one-based row number.
     {"name": "MinionDoublingStatTypes", "columns": ["Name"]},
+    # 3.30: a jewel's ring size, whose display name is a row of ClientStrings rather than a
+    # column of its own.
+    {"name": "PassiveJewelRadii", "columns": ["ID", "ClientString"]},
     # Every word of the client's UI under a stable id; the lexicon's flag lines come from here.
     {"name": "ClientStrings", "columns": ["Id", "Text"]},
 ]
 
-#: statdesc's table name -> (dat table, its display-name column).
+#: statdesc's table name -> (dat table, its display-name column). A column that is a key into
+#: ClientStrings is followed to that row's text.
 INDEXABLE_TABLES = {"skill": ("IndexableSkillGems", "Name1"),
                     "support": ("IndexableSupportGems", "Name"),
-                    "minion_doubling": ("MinionDoublingStatTypes", "Name")}
+                    "minion_doubling": ("MinionDoublingStatTypes", "Name"),
+                    "jewel_radius": ("PassiveJewelRadii", "ClientString")}
 
 
 def write_config(workdir: Path, patch: str, files: list[str]) -> None:
@@ -184,8 +189,15 @@ def indexable_names(workdir: Path) -> dict[str, list[str]]:
     whose range is 1..287.
     """
     out: dict[str, list[str]] = {}
+    strings: list[dict] | None = None
     for kind, (name, column) in INDEXABLE_TABLES.items():
-        out[kind] = [r[column] for r in table(workdir, name)]
+        rows = table(workdir, name)
+        if rows and isinstance(rows[0].get(column), int):
+            strings = strings if strings is not None else table(workdir, "ClientStrings")
+            out[kind] = [strings[r[column]]["Text"] if r[column] is not None else ""
+                         for r in rows]
+        else:
+            out[kind] = [r[column] for r in rows]
     return out
 
 

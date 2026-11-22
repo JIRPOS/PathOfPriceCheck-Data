@@ -52,11 +52,16 @@ def strip_markup(text: str) -> str:
 # 3.30 added "minion_doubling_type": The Dark Monarch's sixteen wordings, one per minion type,
 # became one wording that names the type twice ("Maximum number of {0} is Doubled\nCannot have
 # Minions other than {0}"). Without it that modifier is a single "#" filter with no trade id.
+# Unknown handler names are not an error, so a new one fails exactly that quietly: when a
+# unique's named roll comes back as one "#" filter, look for a handler missing here.
 INDEXABLE_TABLES = {
     "display_indexable_skill": "skill",
     "display_indexable_support": "support",
     "display_indexable_non_active_support": "support",
     "minion_doubling_type": "minion_doubling",
+    # 3.30 likewise folded Thread of Hope's one-wording-per-ring-size into "Only affects
+    # Passives in {0} Ring", naming the size out of a table.
+    "passive_jewel_radius": "jewel_radius",
 }
 
 
