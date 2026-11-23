@@ -1,5 +1,5 @@
 {
- "last_hour": 1795370400,
+ "last_hour": 1795413600,
  "ids": [
   "Metadata/Items/AtlasExiles/AddModToRareCrusader",
   "Metadata/Items/AtlasExiles/AddModToRareHunter",
@@ -506,6 +506,7 @@
   "Metadata/Items/Currency/ScoutingReports/AtlasScoutingReportJuiced",
   "Metadata/Items/Currency/ScoutingReports/AtlasScoutingReportMoreHidden",
   "Metadata/Items/Currency/ScoutingReports/AtlasScoutingReportUnique",
+  "Metadata/Items/Currency/StackedAstrolabe",
   "Metadata/Items/Deepwater/DeepwaterAbyssCurrency",
   "Metadata/Items/Deepwater/DeepwaterAttributeSwap",
   "Metadata/Items/Deepwater/DeepwaterBlankCurrency",
